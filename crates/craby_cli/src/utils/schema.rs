@@ -1,43 +1,62 @@
 use craby_codegen::types::schema::Schema;
-use craby_common::config::CompleteCrabyConfig;
+use log::error;
 use owo_colors::OwoColorize;
 
 use crate::utils::terminal::CodeHighlighter;
 
-pub fn print_schema(schema: &Schema, config: &CompleteCrabyConfig) {
+pub fn print_schema(schema: &Schema) -> Result<(), anyhow::Error> {
     println!("├─ Methods ({})", schema.spec.methods.len());
 
     let highlighter = CodeHighlighter::new();
 
-    schema
-        .spec
-        .methods
-        .iter()
-        .enumerate()
-        .for_each(|(i, method)| {
-            if i == schema.spec.methods.len() - 1 {
-                print!("│   └─ ");
-            } else {
-                print!("│   ├─ ");
+    schema.spec.methods.iter().enumerate().try_for_each(
+        |(i, method)| -> Result<(), anyhow::Error> {
+            match method.as_sig() {
+                Ok(method_sig) => {
+                    if i == schema.spec.methods.len() - 1 {
+                        print!("│   └─ ");
+                    } else {
+                        print!("│   ├─ ");
+                    }
+                    highlighter.highlight_code(&method_sig, "rs");
+                }
+                Err(e) => {
+                    error!("Failed to get method signature: {}", method.name);
+                    return Err(e);
+                }
             }
 
-            if config.is_excluded_method(&method.name) {
-                println!(
-                    "{} {}",
-                    method.to_rs_fn_sig(true).dimmed(),
-                    "(excluded)".yellow()
-                );
-            } else if config.is_included_method(&method.name) {
-                highlighter.highlight_code(&method.to_rs_fn_sig(true), "rs");
-            } else {
-                println!("{} {}", method.name, "(not included)".dimmed());
-            }
-        });
-    // TODO: Impl
-    println!("├─ Event Emitters (0)");
-    println!("│  {}", "(None)".dimmed());
-    println!("├─ Type Aliases (0)");
-    println!("│  {}", "(None)".dimmed());
-    println!("└─ Enums (0)");
-    println!("   {}", "(None)".dimmed());
+            Ok(())
+        },
+    )?;
+
+    // Type Aliases
+    println!("├─ Alias types ({})", schema.alias_map.len());
+    schema.alias_map.keys().enumerate().for_each(|(i, name)| {
+        if i == schema.alias_map.len() - 1 {
+            print!("│   └─ ");
+        } else {
+            print!("│   ├─ ");
+        }
+        println!("{}", name.blue());
+    });
+    if schema.alias_map.is_empty() {
+        println!("   {}", "(None)".dimmed());
+    }
+
+    // Enums
+    println!("└─ Enum types ({})", schema.enum_map.len());
+    schema.enum_map.keys().enumerate().for_each(|(i, name)| {
+        if i == schema.enum_map.len() - 1 {
+            print!("    └─ ");
+        } else {
+            print!("    ├─ ");
+        }
+        println!("{}", name.blue());
+    });
+    if schema.enum_map.is_empty() {
+        println!("   {}", "(None)".dimmed());
+    }
+
+    Ok(())
 }

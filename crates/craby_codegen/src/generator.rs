@@ -1,6 +1,20 @@
-use craby_common::{constants::IMPL_MOD_NAME, env::Platform, utils::sanitize_str};
+use craby_common::{
+    constants::impl_mod_name,
+    utils::string::{pascal_case, snake_case},
+};
+use indoc::formatdoc;
 
-use crate::types::schema::Schema;
+use crate::{
+    platform::{
+        cxx::{
+            template::{cxx_enum_bridging_template, cxx_struct_bridging_template},
+            CxxMethod, ToCxxMethod,
+        },
+        rust::{RsCxxBridge, ToRsCxxBridge},
+    },
+    types::{schema::Schema, types::CodegenResult},
+    utils::indent_str,
+};
 
 pub struct CodeGenerator;
 
@@ -9,515 +23,232 @@ impl CodeGenerator {
         Self
     }
 
-    pub fn generate_module(&self, schema: &Schema) -> String {
-        let methods = schema
-            .spec
-            .methods
-            .iter()
-            .map(|spec| spec.to_rs_fn(4, true))
-            .collect::<Vec<_>>();
-        let mod_name = sanitize_str(&schema.module_name);
+    pub fn generate(&self, schema: &Schema) -> Result<CodegenResult, anyhow::Error> {
+        let spec_code = self.generate_spec(schema)?;
+        let impl_code = self.generate_impl(schema)?;
+        let rs_cxx_bridge = self.get_rs_cxx_bridges(schema)?;
+        let cxx_methods = self.get_cxx_methods(schema)?;
+        let cxx_bridging_templates = self.get_cxx_bridging_templates(schema)?;
 
-        format!(
-            "pub mod {} {{\n    use crate::{};\n\n{}\n}}",
-            mod_name,
-            IMPL_MOD_NAME,
-            methods.join("\n\n")
-        )
+        Ok(CodegenResult {
+            module_name: schema.module_name.clone(),
+            ffi_mod: snake_case(&schema.module_name),
+            impl_mod: impl_mod_name(&schema.module_name),
+            spec_code,
+            impl_code,
+            rs_cxx_bridge,
+            cxx_methods,
+            cxx_bridging_templates,
+        })
     }
 
-    pub fn generate_android_ffi_module(
-        &self,
-        schema: &Schema,
-        lib_name: &String,
-        java_package_name: &String,
-    ) -> String {
-        let mod_name = sanitize_str(&schema.module_name);
-        let class_name = format!("{}Module", &schema.module_name);
-        let mut imports = vec![
-            "use craby_core::jni::sys::*;".to_string(),
-            "use craby_core::jni::{objects::JObject, JNIEnv};".to_string(),
-        ];
-
-        let interop_imports = schema.get_interop_imports(Platform::Android);
-        for import in interop_imports {
-            imports.push(format!("use {};", import));
-        }
-
+    /// Generate the spec trait for the given schema.
+    ///
+    /// ```rust,ignore
+    /// pub trait MyModuleSpec {
+    ///     fn multiply(a: f64, b: f64) -> f64;
+    /// }
+    /// ```
+    fn generate_spec(&self, schema: &Schema) -> Result<String, anyhow::Error> {
+        let trait_name = pascal_case(format!("{}Spec", schema.module_name).as_str());
         let methods = schema
             .spec
             .methods
             .iter()
-            .map(|spec| spec.to_android_ffi_fn(lib_name, &mod_name, java_package_name, &class_name))
-            .collect::<Vec<_>>();
+            .map(|spec| -> Result<String, anyhow::Error> {
+                let sig = spec.as_sig()?;
+                Ok(format!("{};", sig))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
-        format!(
-            "{imports}\n\n{methods}",
-            imports = imports.join("\n"),
-            methods = methods.join("\n\n")
-        )
+        // ```rust,ignore
+        // pub trait MyModuleSpec {
+        //     fn multiply(a: f64, b: f64) -> f64;
+        // }
+        // ```
+        let code = formatdoc! {
+          r#"
+          pub trait {trait_name} {{
+          {methods}
+          }}"#,
+          trait_name = trait_name,
+          methods = indent_str(methods.join("\n"), 4),
+        };
+
+        Ok(code)
     }
 
-    pub fn generate_ios_ffi_module(&self, schema: &Schema, lib_name: &String) -> String {
-        let mod_name = sanitize_str(&schema.module_name);
-        let mut imports = vec!["use std::os::raw::*;".to_string()];
-
-        let interop_imports = schema.get_interop_imports(Platform::Ios);
-        for import in interop_imports {
-            imports.push(format!("use {};", import));
-        }
+    /// Generate the empty module for the given schema.
+    ///
+    /// ```rust,ignore
+    /// use crate::{ffi::my_module::*, generated::*};
+    ///
+    /// pub struct MyModule;
+    ///
+    /// impl MyModuleSpec for MyModule {
+    ///     fn multiply(a: f64, b: f64) -> f64 {
+    ///         unimplemented!();
+    ///     }
+    /// }
+    /// ```
+    fn generate_impl(&self, schema: &Schema) -> Result<String, anyhow::Error> {
+        let mod_name = pascal_case(schema.module_name.as_str());
+        let snake_name = snake_case(schema.module_name.as_str());
+        let trait_name = pascal_case(format!("{}Spec", schema.module_name).as_str());
 
         let methods = schema
             .spec
             .methods
             .iter()
-            .map(|spec| spec.to_ios_ffi_fn(lib_name, &mod_name))
-            .collect::<Vec<_>>();
+            .map(|spec| -> Result<String, anyhow::Error> {
+                let func_sig = spec.as_sig()?;
 
-        format!(
-            "{imports}\n\n{methods}",
-            imports = imports.join("\n"),
-            methods = methods.join("\n\n")
-        )
+                // ```rust,ignore
+                // fn multiply(a: f64, b: f64) -> f64 {
+                //     unimplemented!();
+                // }
+                // ```
+                let code = formatdoc! {
+                  r#"
+                  {func_sig} {{
+                      unimplemented!();
+                  }}"#,
+                  func_sig = func_sig,
+                };
+
+                Ok(code)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // ```rust,ignore
+        // use crate::{ffi::my_module::*, generated::*};
+        //
+        // pub struct MyModule;
+        //
+        // impl MyModuleSpec for MyModule {
+        //     fn multiply(a: f64, b: f64) -> f64 {
+        //         unimplemented!();
+        //     }
+        // }
+        // ```
+        let code = formatdoc! {
+          r#"
+          use crate::{{ffi::{snake_name}::*, generated::*}};
+
+          pub struct {mod_name};
+
+          impl {trait_name} for {mod_name} {{
+          {methods}
+          }}"#,
+          snake_name = snake_name,
+          trait_name = trait_name,
+          mod_name= mod_name,
+          methods = indent_str(methods.join("\n\n"), 4),
+        };
+
+        Ok(code)
+    }
+
+    /// Returns the cxx function signature for the `FunctionSpec`.
+    fn get_rs_cxx_bridges(&self, schema: &Schema) -> Result<RsCxxBridge, anyhow::Error> {
+        schema.to_rs_cxx_bridge()
+    }
+
+    /// Returns the cxx function implementations for the `FunctionSpec`.
+    fn get_cxx_methods(&self, schema: &Schema) -> Result<Vec<CxxMethod>, anyhow::Error> {
+        let res = schema
+            .spec
+            .methods
+            .iter()
+            .map(|spec| spec.to_cxx_method(&schema.module_name))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(res)
+    }
+
+    /// Returns the cxx JSI bridging templates for the `Schema`.
+    fn get_cxx_bridging_templates(&self, schema: &Schema) -> Result<Vec<String>, anyhow::Error> {
+        let mut bridging_templates = vec![];
+
+        schema.alias_map.iter().try_for_each(
+            |(name, alias_spec)| -> Result<(), anyhow::Error> {
+                let struct_template =
+                    cxx_struct_bridging_template(&schema.module_name, name, alias_spec)?;
+                bridging_templates.push(struct_template);
+                Ok(())
+            },
+        )?;
+
+        schema
+            .enum_map
+            .iter()
+            .try_for_each(|(name, enum_spec)| -> Result<(), anyhow::Error> {
+                let enum_template =
+                    cxx_enum_bridging_template(&schema.module_name, name, enum_spec)?;
+                bridging_templates.push(enum_template);
+                Ok(())
+            })?;
+
+        Ok(bridging_templates)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use insta::assert_snapshot;
+
+    use crate::tests::load_schema_json;
+
     use super::*;
 
     #[test]
-    fn test_function_generation() {
-        let json_schema = r#"
-        {
-          "moduleName": "MyModule",
-          "type": "NativeModule",
-          "aliasMap": {},
-          "enumMap": {},
-          "spec": {
-            "eventEmitters": [],
-            "methods": [
-              {
-                "name": "multiply",
-                "optional": false,
-                "typeAnnotation": {
-                  "type": "FunctionTypeAnnotation",
-                  "returnTypeAnnotation": {
-                    "type": "NumberTypeAnnotation"
-                  },
-                  "params": [
-                    {
-                      "name": "a",
-                      "optional": false,
-                      "typeAnnotation": {
-                        "type": "NumberTypeAnnotation"
-                      }
-                    },
-                    {
-                      "name": "b",
-                      "optional": false,
-                      "typeAnnotation": {
-                        "type": "NumberTypeAnnotation"
-                      }
-                    }
-                  ]
-                }
-              }
-            ]
-          }
-        }
-        "#;
-
+    fn test_generate_spec() {
+        let schema = load_schema_json::<Schema>();
         let generator = CodeGenerator::new();
-        let schema = serde_json::from_str::<Schema>(json_schema).unwrap();
-        let result = generator.generate_module(&schema);
+        let result = generator.generate_spec(&schema).unwrap();
 
-        assert_eq!(
-            result,
-            [
-                "pub mod my_module {",
-                "    use crate::impls;",
-                "",
-                "    pub fn multiply(a: f64, b: f64) -> f64 {",
-                "        impls::multiply(a, b)",
-                "    }",
-                "}",
-            ]
-            .join("\n")
-        );
+        assert_snapshot!(result);
     }
 
     #[test]
-    fn test_void_function_generation() {
-        let json_schema = r#"
-        {
-          "moduleName": "MyModule",
-          "type": "NativeModule",
-          "aliasMap": {},
-          "enumMap": {},
-          "spec": {
-            "eventEmitters": [],
-            "methods": [
-              {
-                "name": "log_message",
-                "optional": false,
-                "typeAnnotation": {
-                  "type": "FunctionTypeAnnotation",
-                  "returnTypeAnnotation": {
-                    "type": "VoidTypeAnnotation"
-                  },
-                  "params": [
-                    {
-                      "name": "message",
-                      "optional": false,
-                      "typeAnnotation": {
-                        "type": "StringTypeAnnotation"
-                      }
-                    }
-                  ]
-                }
-              }
-            ]
-          }
-        }
-        "#;
-
-        // TODO: Implement void function generation
-        assert_eq!(json_schema, json_schema);
-    }
-
-    #[test]
-    fn test_optional_parameters() {
-        let json_schema = r#"
-        {
-          "moduleName": "MyModule",
-          "type": "NativeModule",
-          "aliasMap": {},
-          "enumMap": {},
-          "spec": {
-            "eventEmitters": [],
-            "methods": [
-              {
-                "name": "greet",
-                "optional": false,
-                "typeAnnotation": {
-                  "type": "FunctionTypeAnnotation",
-                  "returnTypeAnnotation": {
-                    "type": "StringTypeAnnotation"
-                  },
-                  "params": [
-                    {
-                      "name": "name",
-                      "optional": false,
-                      "typeAnnotation": {
-                        "type": "StringTypeAnnotation"
-                      }
-                    },
-                    {
-                      "name": "age",
-                      "optional": true,
-                      "typeAnnotation": {
-                        "type": "NumberTypeAnnotation"
-                      }
-                    }
-                  ]
-                }
-              }
-            ]
-          }
-        }
-        "#;
-
-        // TODO: Implement optional parameters
-        assert_eq!(json_schema, json_schema);
-    }
-
-    #[test]
-    fn test_enum_and_union_types() {
-        let json_schema = r#"
-        {
-          "moduleName": "MyModule",
-          "type": "NativeModule",
-          "aliasMap": {},
-          "enumMap": {},
-          "spec": {
-            "eventEmitters": [],
-            "methods": [
-              {
-                "name": "handle_value",
-                "optional": false,
-                "typeAnnotation": {
-                  "type": "FunctionTypeAnnotation",
-                  "returnTypeAnnotation": {
-                    "type": "VoidTypeAnnotation"
-                  },
-                  "params": [
-                    {
-                      "name": "enum_param",
-                      "optional": false,
-                      "typeAnnotation": {
-                        "type": "EnumDeclaration",
-                        "memberType": "StringTypeAnnotation",
-                        "members": [
-                          {"name": "OPTION_A", "value": "a"},
-                          {"name": "OPTION_B", "value": "b"}
-                        ]
-                      }
-                    },
-                    {
-                      "name": "union_param",
-                      "optional": false,
-                      "typeAnnotation": {
-                        "type": "UnionTypeAnnotation",
-                        "memberType": "NumberTypeAnnotation",
-                        "types": []
-                      }
-                    }
-                  ]
-                }
-              }
-            ]
-          }
-        }
-        "#;
-
-        // TODO: Implement enum and union types
-        assert_eq!(json_schema, json_schema);
-    }
-
-    // Skip
-    #[test]
-    fn test_nullable_types() {
-        let json_schema = r#"
-        {
-          "moduleName": "MyModule",
-          "type": "NativeModule",
-          "aliasMap": {},
-          "enumMap": {},
-          "spec": {
-            "eventEmitters": [],
-            "methods": [
-              {
-                "name": "nullable_test",
-                "optional": false,
-                "typeAnnotation": {
-                  "type": "FunctionTypeAnnotation",
-                  "returnTypeAnnotation": {
-                    "type": "NullableTypeAnnotation",
-                    "typeAnnotation": {
-                      "type": "StringTypeAnnotation"
-                    }
-                  },
-                  "params": [
-                    {
-                      "name": "nullable_param",
-                      "optional": false,
-                      "typeAnnotation": {
-                        "type": "NullableTypeAnnotation",
-                        "typeAnnotation": {
-                          "type": "NumberTypeAnnotation"
-                        }
-                      }
-                    }
-                  ]
-                }
-              }
-            ]
-          }
-        }
-        "#;
-
-        // TODO: Implement nullable types
-        assert_eq!(json_schema, json_schema);
-    }
-
-    #[test]
-    fn test_generate_module() {
-        let json_schema = r#"
-        {
-          "moduleName": "MyModule",
-          "type": "NativeModule",
-          "aliasMap": {},
-          "enumMap": {},
-          "spec": {
-            "eventEmitters": [],
-            "methods": [
-              {
-                "name": "multiply",
-                "optional": false,
-                "typeAnnotation": {
-                  "type": "FunctionTypeAnnotation",
-                  "returnTypeAnnotation": {
-                    "type": "NumberTypeAnnotation"
-                  },
-                  "params": [
-                    {
-                      "name": "a",
-                      "optional": false,
-                      "typeAnnotation": {
-                        "type": "NumberTypeAnnotation"
-                      }
-                    },
-                    {
-                      "name": "b",
-                      "optional": false,
-                      "typeAnnotation": {
-                        "type": "NumberTypeAnnotation"
-                      }
-                    }
-                  ]
-                }
-              }
-            ]
-          }
-        }
-        "#;
-
+    fn test_generate_impl() {
+        let schema = load_schema_json::<Schema>();
         let generator = CodeGenerator::new();
-        let schema = serde_json::from_str::<Schema>(json_schema).unwrap();
-        let result = generator.generate_module(&schema);
+        let result = generator.generate_impl(&schema).unwrap();
 
-        assert_eq!(
-            result,
-            [
-                "pub mod my_module {",
-                "    use crate::impls;",
-                "",
-                "    pub fn multiply(a: f64, b: f64) -> f64 {",
-                "        impls::multiply(a, b)",
-                "    }",
-                "}",
-            ]
-            .join("\n")
-        );
+        assert_snapshot!(result);
     }
 
     #[test]
-    fn test_generate_android_ffi_module() {
-        let json_schema = r#"
-      {
-        "moduleName": "MyModule",
-        "type": "NativeModule",
-        "aliasMap": {},
-        "enumMap": {},
-        "spec": {
-          "eventEmitters": [],
-          "methods": [
-            {
-              "name": "multiply",
-              "optional": false,
-              "typeAnnotation": {
-                "type": "FunctionTypeAnnotation",
-                "returnTypeAnnotation": {
-                  "type": "NumberTypeAnnotation"
-                },
-                "params": [
-                  {
-                    "name": "a",
-                    "optional": false,
-                    "typeAnnotation": {
-                      "type": "NumberTypeAnnotation"
-                    }
-                  },
-                  {
-                    "name": "b",
-                    "optional": false,
-                    "typeAnnotation": {
-                      "type": "StringTypeAnnotation"
-                    }
-                  }
-                ]
-              }
-            }
-          ]
-        }
-      }
-      "#;
-
+    fn test_generate_rs_cxx_bridges() {
+        let schema = load_schema_json::<Schema>();
         let generator = CodeGenerator::new();
-        let schema = serde_json::from_str::<Schema>(json_schema).unwrap();
-        let result = generator.generate_android_ffi_module(
-            &schema,
-            &"lib".to_string(),
-            &"com.example".to_string(),
-        );
+        let result = generator.get_rs_cxx_bridges(&schema).unwrap();
 
-        assert_eq!(
-            result,
-            [
-                "use craby_core::jni::sys::*;",
-                "use craby_core::jni::{objects::JObject, JNIEnv};",
-                "use craby_core::android::interop::string::*;",
-                "",
-                "#[no_mangle]",
-                "pub extern \"C\" fn Java_com_example_MyModuleModule_nativeMultiply(mut env: JNIEnv, _class: JObject, a: jdouble, b: jstring) -> jdouble {",
-                "    let b = String::from_native(b, &mut env).unwrap();",
-                "    lib::my_module::multiply(a, b)",
-                "}",
-            ]
-            .join("\n")
-        );
+        assert_snapshot!(result.extern_func);
+        assert_snapshot!(result.impl_func);
     }
 
     #[test]
-    fn test_generate_ios_ffi_module() {
-        let json_schema = r#"
-      {
-        "moduleName": "MyModule",
-        "type": "NativeModule",
-        "aliasMap": {},
-        "enumMap": {},
-        "spec": {
-          "eventEmitters": [],
-          "methods": [
-            {
-              "name": "multiply",
-              "optional": false,
-              "typeAnnotation": {
-                "type": "FunctionTypeAnnotation",
-                "returnTypeAnnotation": {
-                  "type": "NumberTypeAnnotation"
-                },
-                "params": [
-                  {
-                    "name": "a",
-                    "optional": false,
-                    "typeAnnotation": {
-                      "type": "NumberTypeAnnotation"
-                    }
-                  },
-                  {
-                    "name": "b",
-                    "optional": false,
-                    "typeAnnotation": {
-                      "type": "StringTypeAnnotation"
-                    }
-                  }
-                ]
-              }
-            }
-          ]
-        }
-      }
-      "#;
-
+    fn test_get_cxx_bridging_templates() {
+        let schema = load_schema_json::<Schema>();
         let generator = CodeGenerator::new();
-        let schema = serde_json::from_str::<Schema>(json_schema).unwrap();
-        let result = generator.generate_ios_ffi_module(&schema, &"lib".to_string());
+        let result = generator.get_cxx_bridging_templates(&schema).unwrap();
 
-        assert_eq!(
-            result,
-            [
-                "use std::os::raw::*;",
-                "use craby_core::ios::interop::string::*;",
-                "",
-                "#[no_mangle]",
-                "pub extern \"C\" fn multiply(a: c_double, b: *const c_char) -> c_double {",
-                "    let b = String::from_native(b).unwrap();",
-                "    lib::my_module::multiply(a, b)",
-                "}",
-            ]
-            .join("\n")
-        );
+        assert_snapshot!(result.join("\n"));
+    }
+
+    #[test]
+    fn test_get_cxx_methods() {
+        let schema = load_schema_json::<Schema>();
+        let generator = CodeGenerator::new();
+        let result = generator.get_cxx_methods(&schema).unwrap();
+
+        assert_snapshot!(result
+            .into_iter()
+            .map(|method| vec![method.name, method.impl_func, method.metadata])
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("\n"));
     }
 }

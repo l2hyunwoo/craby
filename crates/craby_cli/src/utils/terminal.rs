@@ -1,4 +1,4 @@
-use std::{thread::sleep, time::Duration};
+use std::time::Duration;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use syntect::{
@@ -6,18 +6,20 @@ use syntect::{
 };
 use syntect_assets::assets::HighlightingAssets;
 
-pub fn with_spinner(msg: &str, f: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<()> {
+pub fn with_spinner(
+    msg: &str,
+    f: impl FnOnce(&ProgressBar) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
     let pb = ProgressBar::new_spinner();
 
     pb.set_message(msg.to_string());
     pb.set_style(
         ProgressStyle::default_spinner()
             .template("{spinner:.green} {msg}")
-            .expect("Invalid template"),
+            .unwrap(),
     );
     pb.enable_steady_tick(Duration::from_millis(120));
-    f()?;
-    sleep(Duration::from_secs(3));
+    f(&pb)?;
     pb.finish_and_clear();
 
     Ok(())
@@ -50,6 +52,30 @@ impl CodeHighlighter {
             self.highlight_line(line, ext);
             println!();
         }
+    }
+
+    pub fn highlight_code_with_box(&self, code: &str, ext: &str) {
+        let lines = code.split("\n").collect::<Vec<&str>>();
+        let mut max_len = 0;
+
+        lines.iter().for_each(|line| {
+            if line.len() > max_len {
+                max_len = line.len();
+            }
+        });
+
+        max_len += 2; // For the extra padding (left, right)
+
+        println!("╭{}╮", "─".repeat(max_len));
+        for line in lines {
+            // Add padding in `print!` macro, so we need to subtract 2
+            let pad = max_len - line.len() - 2;
+            print!("│ ");
+            self.highlight_line(line, ext);
+            print!("{} │", " ".repeat(pad));
+            println!();
+        }
+        println!("╰{}╯", "─".repeat(max_len));
     }
 
     fn reset_color(&self) {

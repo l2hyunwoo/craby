@@ -49,12 +49,7 @@ yarn add --dev @craby/cli
 
 ### Setup
 
-```bash
-# In your existing React Native TurboModule project root
-craby init
-```
-
-This adds Rust capabilities to your existing project.
+TBD (Scaffold)
 
 ```bash
 # Generates Rust code based on your TurboModule schemas.
@@ -65,13 +60,6 @@ craby build
 ```
 
 ## Commands
-
-### `craby init`
-
-Scaffolds Rust integration into an existing React Native TurboModule project. This command:
-
-- Creates Rust crate structure (`crates/*`)
-- Integrates Rust toolchain into your existing project
 
 ### `craby codegen`
 
@@ -151,7 +139,7 @@ export function subtract(a: number, b: number): number {
 
 After running `craby codegen`, you'll get:
 
-```rust
+```rust,ignore
 // crates/lib/src/lib.rs (auto-generated)
 pub mod calculator {
     use crate::impls;
@@ -168,7 +156,7 @@ pub mod calculator {
 mod impls;
 ```
 
-```rust
+```rust,ignore
 // crates/lib/src/impls.rs (you implement this)
 pub fn add(a: f64, b: f64) -> f64 {
     a + b

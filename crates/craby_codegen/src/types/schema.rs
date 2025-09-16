@@ -1,46 +1,10 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
-use craby_common::{constants, env::Platform, utils::sanitize_str};
+use craby_common::utils::string::snake_case;
 use log::error;
 use serde::{Deserialize, Serialize};
 
-use crate::utils::to_jni_fn_name;
-
-use super::types::{InteropInfo, Type};
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct SchemaInfo {
-    pub library: Library,
-    #[serde(rename = "supportedApplePlatforms")]
-    pub supported_apple_platforms: HashMap<String, String>,
-    pub schema: SchemaMap,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct SchemaMap {
-    pub modules: HashMap<String, Schema>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Library {
-    pub name: String,
-    pub config: LibraryConfig,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct LibraryConfig {
-    pub name: Option<String>,
-    pub r#type: Option<String>,
-    #[serde(rename = "jsSrcsDir")]
-    pub js_srcs_dir: Option<String>,
-    pub android: Option<AndroidConfig>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct AndroidConfig {
-    #[serde(rename = "javaPackageName")]
-    pub java_package_name: Option<String>,
-}
+use crate::platform::rust::ToRsType;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Schema {
@@ -49,10 +13,46 @@ pub struct Schema {
     // NativeModule, Component
     pub r#type: String,
     #[serde(rename = "aliasMap")]
-    pub alias_map: HashMap<String, String>,
+    pub alias_map: BTreeMap<String, Alias>,
     #[serde(rename = "enumMap")]
-    pub enum_map: HashMap<String, String>,
+    pub enum_map: BTreeMap<String, Enum>,
     pub spec: Spec,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Alias {
+    pub r#type: String,
+    pub properties: Vec<AliasProperty>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct AliasProperty {
+    pub name: String,
+    pub optional: bool,
+    #[serde(rename = "typeAnnotation")]
+    pub type_annotation: Box<TypeAnnotation>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Enum {
+    pub name: String,
+    pub r#type: String,
+    #[serde(rename = "memberType")]
+    pub member_type: String,
+    #[serde(default)]
+    pub members: Option<Vec<EnumMember>>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct EnumMember {
+    pub name: String,
+    pub value: EnumMemberValue,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct EnumMemberValue {
+    pub r#type: String,
+    pub value: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -70,15 +70,6 @@ pub enum TypeAnnotation {
         name: String,
     },
 
-    // String types
-    StringTypeAnnotation,
-    StringLiteralTypeAnnotation {
-        value: String,
-    },
-    StringLiteralUnionTypeAnnotation {
-        values: Vec<String>,
-    },
-
     // Boolean type
     BooleanTypeAnnotation,
 
@@ -91,11 +82,13 @@ pub enum TypeAnnotation {
         value: f64,
     },
 
-    // Enum
-    EnumDeclaration {
-        #[serde(rename = "memberType")]
-        member_type: String,
-        members: Vec<EnumMember>,
+    // String types
+    StringTypeAnnotation,
+    StringLiteralTypeAnnotation {
+        value: String,
+    },
+    StringLiteralUnionTypeAnnotation {
+        types: Vec<Box<TypeAnnotation>>,
     },
 
     // Array type
@@ -104,12 +97,13 @@ pub enum TypeAnnotation {
         element_type: Box<TypeAnnotation>,
     },
 
-    // Function type
-    #[serde(rename = "FunctionTypeAnnotation")]
-    FunctionTypeAnnotation {
-        #[serde(rename = "returnTypeAnnotation")]
-        return_type_annotation: Box<TypeAnnotation>,
-        params: Vec<Parameter>,
+    // Enum
+    EnumDeclaration {
+        name: String,
+        #[serde(rename = "memberType")]
+        member_type: String,
+        #[serde(default)]
+        members: Option<Vec<EnumMember>>,
     },
 
     // Object types
@@ -118,11 +112,23 @@ pub enum TypeAnnotation {
         properties: Option<Vec<ObjectProperty>>,
     },
 
+    // Function type
+    FunctionTypeAnnotation {
+        #[serde(rename = "returnTypeAnnotation")]
+        return_type_annotation: Box<TypeAnnotation>,
+        params: Vec<Parameter>,
+    },
+
     // Union type
     UnionTypeAnnotation {
         #[serde(rename = "memberType")]
         member_type: String,
-        types: Vec<TypeAnnotation>,
+    },
+
+    // Promise type
+    PromiseTypeAnnotation {
+        #[serde(rename = "elementType")]
+        element_type: Box<TypeAnnotation>,
     },
 
     // Mixed type
@@ -131,7 +137,7 @@ pub enum TypeAnnotation {
     // Void type
     VoidTypeAnnotation,
 
-    // Nullable wrapper
+    // Nullable type
     NullableTypeAnnotation {
         #[serde(rename = "typeAnnotation")]
         type_annotation: Box<TypeAnnotation>,
@@ -143,202 +149,7 @@ pub enum TypeAnnotation {
     },
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct EnumMember {
-    pub name: String,
-    pub value: serde_json::Value,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct ObjectProperty {
-    pub name: String,
-    pub optional: bool,
-    #[serde(rename = "typeAnnotation")]
-    pub type_annotation: TypeAnnotation,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Parameter {
-    pub name: String,
-    pub optional: bool,
-    #[serde(rename = "typeAnnotation")]
-    pub type_annotation: TypeAnnotation,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct FunctionSpec {
-    pub name: String,
-    pub optional: bool,
-    #[serde(rename = "typeAnnotation")]
-    pub type_annotation: TypeAnnotation,
-}
-
 impl TypeAnnotation {
-    pub fn to_rs_type(&self) -> String {
-        match self {
-            // Boolean type
-            TypeAnnotation::BooleanTypeAnnotation => Type::Boolean,
-
-            // Number types
-            TypeAnnotation::NumberTypeAnnotation => Type::Number,
-            TypeAnnotation::FloatTypeAnnotation => Type::Number,
-            TypeAnnotation::DoubleTypeAnnotation => Type::Number,
-            TypeAnnotation::Int32TypeAnnotation => Type::Number,
-            TypeAnnotation::NumberLiteralTypeAnnotation { .. } => Type::Number,
-
-            // String types
-            TypeAnnotation::StringTypeAnnotation => Type::String,
-            TypeAnnotation::StringLiteralTypeAnnotation { .. } => Type::String,
-            TypeAnnotation::StringLiteralUnionTypeAnnotation { .. } => Type::String,
-
-            _ => {
-                error!("Unsupported type annotation: {:?}", self);
-                unimplemented!();
-                // match unsuported_type_annotation {
-                //     // Reserved types
-                //     TypeAnnotation::ReservedTypeAnnotation { name } => match name.as_str() {
-                //         "RootTag" => Type::Number,
-                //         _ => unimplemented!("Unknown reserved type: {}", name),
-                //     },
-
-                //     // Enum
-                //     TypeAnnotation::EnumDeclaration { member_type, .. } => {
-                //         match member_type.as_str() {
-                //             "NumberTypeAnnotation" => Type::Number,
-                //             "StringTypeAnnotation" => Type::String,
-                //             _ => unimplemented!("Unknown enum type: {}", member_type),
-                //         }
-                //     }
-
-                //     // Array type
-                //     TypeAnnotation::ArrayTypeAnnotation { element_type } => {
-                //         Type::Array(element_type.to_rs_type())
-                //     }
-
-                //     // Function type
-                //     TypeAnnotation::FunctionTypeAnnotation { .. } => {
-                //         unimplemented!("FunctionTypeAnnotation")
-                //     }
-
-                //     // Object types
-                //     TypeAnnotation::GenericObjectTypeAnnotation => {
-                //         unimplemented!("GenericObjectTypeAnnotation");
-                //     }
-                //     TypeAnnotation::ObjectTypeAnnotation { .. } => {
-                //         unimplemented!("ObjectTypeAnnotation");
-                //     }
-
-                //     // Union type
-                //     TypeAnnotation::UnionTypeAnnotation { member_type, .. } => {
-                //         match member_type.as_str() {
-                //             // TODO: Enum type support
-                //             "NumberTypeAnnotation" => Type::Number,
-                //             "StringTypeAnnotation" => Type::String,
-                //             "ObjectTypeAnnotation" => unimplemented!("ObjectTypeAnnotation"),
-                //             _ => unimplemented!("Unknown union type: {}", member_type),
-                //         }
-                //     }
-
-                //     // Mixed type
-                //     TypeAnnotation::MixedTypeAnnotation => unimplemented!("MixedTypeAnnotation"),
-
-                //     // Void type
-                //     TypeAnnotation::VoidTypeAnnotation => Type::Void,
-
-                //     // Nullable wrapper
-                //     TypeAnnotation::NullableTypeAnnotation { type_annotation } => {
-                //         Type::Nullable(type_annotation.to_rs_type())
-                //     }
-
-                //     // Type alias
-                //     TypeAnnotation::TypeAliasTypeAnnotation { .. } => {
-                //         unimplemented!("TypeAliasTypeAnnotation")
-                //     }
-                // }
-            }
-        }
-        .to_string()
-    }
-
-    pub fn get_rust_type(&self) -> Type {
-        match self {
-            // Boolean type
-            TypeAnnotation::BooleanTypeAnnotation => Type::Boolean,
-
-            // Number types
-            TypeAnnotation::NumberTypeAnnotation
-            | TypeAnnotation::FloatTypeAnnotation
-            | TypeAnnotation::DoubleTypeAnnotation
-            | TypeAnnotation::Int32TypeAnnotation
-            | TypeAnnotation::NumberLiteralTypeAnnotation { .. } => Type::Number,
-
-            // String types
-            TypeAnnotation::StringTypeAnnotation
-            | TypeAnnotation::StringLiteralTypeAnnotation { .. }
-            | TypeAnnotation::StringLiteralUnionTypeAnnotation { .. } => Type::String,
-
-            TypeAnnotation::VoidTypeAnnotation => Type::Void,
-
-            _ => {
-                error!("Unsupported type annotation: {:?}", self);
-                unimplemented!();
-            }
-        }
-    }
-
-    pub fn get_interop_info(&self, platform: Platform) -> InteropInfo {
-        self.get_rust_type().get_interop_info(platform)
-    }
-
-    pub fn to_ffi_type(&self, platform: Platform) -> String {
-        let ffi_type = match platform {
-            Platform::Android => match self {
-                // Boolean type
-                TypeAnnotation::BooleanTypeAnnotation => "bool",
-
-                // Number types
-                TypeAnnotation::NumberTypeAnnotation
-                | TypeAnnotation::FloatTypeAnnotation
-                | TypeAnnotation::DoubleTypeAnnotation
-                | TypeAnnotation::Int32TypeAnnotation
-                | TypeAnnotation::NumberLiteralTypeAnnotation { .. } => "jdouble",
-
-                // String types
-                TypeAnnotation::StringTypeAnnotation
-                | TypeAnnotation::StringLiteralTypeAnnotation { .. }
-                | TypeAnnotation::StringLiteralUnionTypeAnnotation { .. } => "jstring",
-
-                _ => {
-                    error!("Unsupported type annotation: {:?}", self);
-                    unimplemented!();
-                }
-            },
-            Platform::Ios => match self {
-                // Boolean type
-                TypeAnnotation::BooleanTypeAnnotation => "bool",
-
-                // Number types
-                TypeAnnotation::NumberTypeAnnotation
-                | TypeAnnotation::FloatTypeAnnotation
-                | TypeAnnotation::DoubleTypeAnnotation
-                | TypeAnnotation::Int32TypeAnnotation
-                | TypeAnnotation::NumberLiteralTypeAnnotation { .. } => "c_double",
-
-                // String types
-                TypeAnnotation::StringTypeAnnotation
-                | TypeAnnotation::StringLiteralTypeAnnotation { .. }
-                | TypeAnnotation::StringLiteralUnionTypeAnnotation { .. } => "*const c_char",
-
-                _ => {
-                    error!("Unsupported type annotation: {:?}", self);
-                    unimplemented!();
-                }
-            },
-        };
-
-        ffi_type.to_string()
-    }
-
     /// Unwrap nullable type annotations to get the inner type and nullable flag
     pub fn unwrap_nullable(&self) -> (&TypeAnnotation, bool) {
         match self {
@@ -351,334 +162,103 @@ impl TypeAnnotation {
     }
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ObjectProperty {
+    pub name: String,
+    pub optional: bool,
+    #[serde(rename = "typeAnnotation")]
+    pub type_annotation: Box<TypeAnnotation>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Parameter {
+    pub name: String,
+    pub optional: bool,
+    #[serde(rename = "typeAnnotation")]
+    pub type_annotation: Box<TypeAnnotation>,
+}
+
 impl Parameter {
-    pub fn to_rs_param(&self) -> String {
+    pub fn as_sig(&self) -> Result<String, anyhow::Error> {
+        if let TypeAnnotation::ObjectTypeAnnotation { .. }
+        | TypeAnnotation::GenericObjectTypeAnnotation { .. } = *self.type_annotation
+        {
+            error!("Object type is not supported for parameters");
+            error!("Use defined type alias instead");
+            unimplemented!();
+        }
+
+        if let TypeAnnotation::FunctionTypeAnnotation { .. } = *self.type_annotation {
+            error!("Function type is not supported for parameters");
+            unimplemented!();
+        }
+
         let (type_annotation, is_nullable) = self.type_annotation.unwrap_nullable();
-        let rust_type = type_annotation.to_rs_type();
+        let param_type = type_annotation.to_rs_type()?;
 
         let final_type = if self.optional && !is_nullable {
-            format!("Option<{}>", rust_type)
+            format!("Option<{}>", param_type)
         } else if is_nullable || self.optional {
-            if rust_type.starts_with("Option<") {
-                rust_type
+            if param_type.starts_with("Option<") {
+                param_type
             } else {
-                format!("Option<{}>", rust_type)
+                format!("Option<{}>", param_type)
             }
         } else {
-            rust_type
+            param_type
         };
 
-        format!("{}: {}", self.name, final_type)
-    }
-
-    pub fn to_ffi_param(&self, platform: Platform) -> String {
-        // TODO: Handle nullable parameters
-        let (type_annotation, _nullable) = self.type_annotation.unwrap_nullable();
-        let ffi_type = type_annotation.to_ffi_type(platform);
-
-        format!("{}: {}", self.name, ffi_type)
+        Ok(format!("{}: {}", self.name, final_type))
     }
 }
 
-impl Schema {
-    pub fn get_interop_imports(&self, platform: Platform) -> Vec<String> {
-        let mut imports = std::collections::HashSet::new();
-
-        for function in &self.spec.methods {
-            if let TypeAnnotation::FunctionTypeAnnotation {
-                return_type_annotation,
-                params,
-            } = &function.type_annotation
-            {
-                // Check return type imports
-                let return_interop = return_type_annotation.get_interop_info(platform);
-                if let Some(import) = return_interop.import_module {
-                    imports.insert(import);
-                }
-
-                // Check parameter imports
-                for param in params {
-                    let (type_annotation, _nullable) = param.type_annotation.unwrap_nullable();
-                    let interop_info = type_annotation.get_interop_info(platform);
-                    if let Some(import) = interop_info.import_module {
-                        imports.insert(import);
-                    }
-                }
-            }
-        }
-
-        imports.into_iter().collect()
-    }
+#[derive(Debug, Deserialize, Serialize)]
+pub struct FunctionSpec {
+    pub name: String,
+    pub optional: bool,
+    #[serde(rename = "typeAnnotation")]
+    pub type_annotation: Box<TypeAnnotation>,
 }
 
 impl FunctionSpec {
-    pub fn to_rs_fn_sig(&self, sanitize: bool) -> String {
-        match &self.type_annotation {
+    pub fn args_count(&self) -> Result<usize, anyhow::Error> {
+        if let TypeAnnotation::FunctionTypeAnnotation { params, .. } = self.type_annotation.as_ref()
+        {
+            Ok(params.len())
+        } else {
+            return Err(anyhow::anyhow!(
+                "Function type annotation should be a function: {}",
+                self.name
+            ));
+        }
+    }
+
+    pub fn as_sig(&self) -> Result<String, anyhow::Error> {
+        match &*self.type_annotation {
             TypeAnnotation::FunctionTypeAnnotation {
                 return_type_annotation,
                 params,
             } => {
-                let return_type = return_type_annotation.to_rs_type();
+                let return_type = return_type_annotation.to_rs_type()?;
                 let params_sig = params
                     .iter()
-                    .map(|p| p.to_rs_param())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                    .map(|param| param.as_sig())
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(|params| params.join(", "))?;
+
+                let fn_name = snake_case(&self.name);
                 let ret_annotation = if return_type == "()" {
                     String::new()
                 } else {
                     format!(" -> {}", return_type)
                 };
-                format!(
+
+                Ok(format!(
                     "fn {}({}){}",
-                    if sanitize {
-                        sanitize_str(&self.name)
-                    } else {
-                        self.name.clone()
-                    },
+                    fn_name.to_string(),
                     params_sig,
                     ret_annotation
-                )
-            }
-            _ => unimplemented!("Unsupported type annotation for function: {}", self.name),
-        }
-    }
-
-    pub fn to_rs_fn(&self, ident: usize, sanitize: bool) -> String {
-        match &self.type_annotation {
-            TypeAnnotation::FunctionTypeAnnotation { params, .. } => {
-                let params = params
-                    .iter()
-                    .map(|p| p.name.clone())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-
-                let fn_sig = self.to_rs_fn_sig(sanitize);
-
-                format!(
-                    "{ident}pub {fn_sig} {{\n    {ident}{body}\n{ident}}}",
-                    fn_sig = fn_sig,
-                    body = format!(
-                        "{}::{}({})",
-                        constants::IMPL_MOD_NAME,
-                        sanitize_str(&self.name),
-                        params
-                    ),
-                    ident = " ".repeat(ident)
-                )
-            }
-            _ => unimplemented!("Unsupported type annotation for function: {}", self.name),
-        }
-    }
-
-    pub fn needs_interop(&self, platform: Platform) -> bool {
-        match &self.type_annotation {
-            TypeAnnotation::FunctionTypeAnnotation {
-                return_type_annotation,
-                params,
-            } => {
-                // Check return type interop
-                let return_interop = return_type_annotation.get_interop_info(platform);
-                if return_interop.import_module.is_some() {
-                    return true;
-                }
-
-                // Check parameter interop
-                for param in params {
-                    let (type_annotation, _nullable) = param.type_annotation.unwrap_nullable();
-                    let interop_info = type_annotation.get_interop_info(platform);
-                    if interop_info.import_module.is_some() {
-                        return true;
-                    }
-                }
-
-                false
-            }
-            _ => false,
-        }
-    }
-
-    pub fn to_android_ffi_fn(
-        &self,
-        lib_name: &String,
-        mod_name: &String,
-        java_package_name: &String,
-        class_name: &String,
-    ) -> String {
-        match &self.type_annotation {
-            TypeAnnotation::FunctionTypeAnnotation {
-                return_type_annotation,
-                params,
-            } => {
-                let needs_interop = self.needs_interop(Platform::Android);
-                let jni_fn_name = to_jni_fn_name(&self.name, java_package_name, class_name);
-                let return_type = return_type_annotation.to_ffi_type(Platform::Android);
-                let params_sig = params
-                    .iter()
-                    .map(|p| p.to_ffi_param(Platform::Android))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                let params_sig = [
-                    if needs_interop {
-                        "mut env: JNIEnv"
-                    } else {
-                        "_env: JNIEnv"
-                    }
-                    .to_string(),
-                    "_class: JObject".to_string(),
-                    params_sig,
-                ]
-                .join(", ");
-
-                let ret_annotation = if return_type == "()" {
-                    String::new()
-                } else {
-                    format!(" -> {}", return_type)
-                };
-
-                // Generate interop code for parameters
-                let mut param_conversions = Vec::new();
-                let mut converted_params = Vec::new();
-
-                for param in params {
-                    let (type_annotation, _nullable) = param.type_annotation.unwrap_nullable();
-                    let interop_info = type_annotation.get_interop_info(Platform::Android);
-
-                    if let Some(from_ffi_fn) = interop_info.from_ffi_fn {
-                        // String type needs conversion
-                        param_conversions.push(format!(
-                            "    let {} = {}({}, &mut env).unwrap();",
-                            param.name, from_ffi_fn, param.name
-                        ));
-                        converted_params.push(param.name.clone());
-                    } else {
-                        // Direct use for Number, Boolean
-                        converted_params.push(param.name.clone());
-                    }
-                }
-
-                // Generate interop code for return value
-                let return_interop = return_type_annotation.get_interop_info(Platform::Android);
-                let param_conv_str = if param_conversions.is_empty() {
-                    String::new()
-                } else {
-                    format!("{}\n", param_conversions.join("\n"))
-                };
-
-                let body = if let Some(to_ffi_fn) = return_interop.to_ffi_fn {
-                    // String return type needs conversion
-                    format!(
-                        "{}    let ret = {}::{}::{}({});\n    ret.{}(&mut env).unwrap()",
-                        param_conv_str,
-                        lib_name,
-                        mod_name,
-                        sanitize_str(&self.name),
-                        converted_params.join(", "),
-                        to_ffi_fn
-                    )
-                } else {
-                    // Direct return for Number, Boolean, Void
-                    format!(
-                        "{}    {}::{}::{}({})",
-                        param_conv_str,
-                        lib_name,
-                        mod_name,
-                        sanitize_str(&self.name),
-                        converted_params.join(", ")
-                    )
-                };
-
-                format!(
-                    "#[no_mangle]\npub extern \"C\" fn {name}({params_sig}){ret_annotation} {{\n{body}\n}}",
-                    name = jni_fn_name,
-                    params_sig = params_sig,
-                    ret_annotation = ret_annotation,
-                    body = body,
-                )
-            }
-            _ => unimplemented!("Unsupported type annotation for function: {}", self.name),
-        }
-    }
-
-    pub fn to_ios_ffi_fn(&self, lib_name: &String, mod_name: &String) -> String {
-        match &self.type_annotation {
-            TypeAnnotation::FunctionTypeAnnotation {
-                return_type_annotation,
-                params,
-            } => {
-                let sanitized_name: String = sanitize_str(&self.name);
-                let return_type = return_type_annotation.to_ffi_type(Platform::Ios);
-                let params_sig = params
-                    .iter()
-                    .map(|p| p.to_ffi_param(Platform::Ios))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-
-                let ret_annotation = if return_type == "()" {
-                    String::new()
-                } else {
-                    format!(" -> {}", return_type)
-                };
-
-                // Generate interop code for parameters
-                let mut param_conversions = Vec::new();
-                let mut converted_params = Vec::new();
-
-                for param in params {
-                    let (type_annotation, _nullable) = param.type_annotation.unwrap_nullable();
-                    let interop_info = type_annotation.get_interop_info(Platform::Ios);
-
-                    if let Some(from_ffi_fn) = interop_info.from_ffi_fn {
-                        // String type needs conversion
-                        param_conversions.push(format!(
-                            "    let {} = {}({}).unwrap();",
-                            param.name, from_ffi_fn, param.name
-                        ));
-                        converted_params.push(param.name.clone());
-                    } else {
-                        // Direct use for Number, Boolean
-                        converted_params.push(param.name.clone());
-                    }
-                }
-
-                // Generate interop code for return value
-                let return_interop = return_type_annotation.get_interop_info(Platform::Ios);
-                let param_conv_str = if param_conversions.is_empty() {
-                    String::new()
-                } else {
-                    format!("{}\n", param_conversions.join("\n"))
-                };
-
-                let body = if let Some(to_ffi_fn) = return_interop.to_ffi_fn {
-                    // String return type needs conversion
-                    format!(
-                        "{}    let ret = {}::{}::{}({});\n    ret.{}().unwrap()",
-                        param_conv_str,
-                        lib_name,
-                        mod_name,
-                        sanitized_name,
-                        converted_params.join(", "),
-                        to_ffi_fn
-                    )
-                } else {
-                    // Direct return for Number, Boolean, Void
-                    format!(
-                        "{}    {}::{}::{}({})",
-                        param_conv_str,
-                        lib_name,
-                        mod_name,
-                        sanitized_name,
-                        converted_params.join(", ")
-                    )
-                };
-
-                format!(
-                    "#[no_mangle]\npub extern \"C\" fn {name}({params_sig}){ret_annotation} {{\n{body}\n}}",
-                    name = self.name,
-                    params_sig = params_sig,
-                    ret_annotation = ret_annotation,
-                    body = body,
-                )
+                ))
             }
             _ => unimplemented!("Unsupported type annotation for function: {}", self.name),
         }
