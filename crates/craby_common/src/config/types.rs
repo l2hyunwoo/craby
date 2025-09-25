@@ -20,16 +20,18 @@ pub struct LibConfig {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct CrabyConfig {
-    pub project: ProjectConfig,
+    pub project: CodegenContextConfig,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct ProjectConfig {
+pub struct CodegenContextConfig {
     pub name: String,
+    pub source_dir: String,
 }
 
 #[derive(Debug)]
 pub struct CompleteCrabyConfig {
+    pub project: CodegenContextConfig,
     pub project_root: PathBuf,
-    pub project: ProjectConfig,
+    pub source_dir: PathBuf,
 }

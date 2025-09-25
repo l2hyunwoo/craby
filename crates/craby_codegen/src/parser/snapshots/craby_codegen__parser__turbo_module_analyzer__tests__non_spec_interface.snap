@@ -1,0 +1,34 @@
+---
+source: crates/craby_codegen/src/parser/turbo_module_analyzer.rs
+expression: result.err().unwrap()
+---
+Oxc {
+    diagnostics: [
+        OxcDiagnostic {
+            inner: OxcDiagnosticInner {
+                message: "Invalid specification",
+                labels: Some(
+                    [
+                        LabeledSpan {
+                            label: None,
+                            span: SourceSpan {
+                                offset: SourceOffset(
+                                    70,
+                                ),
+                                length: 72,
+                            },
+                            primary: false,
+                        },
+                    ],
+                ),
+                help: None,
+                severity: Error,
+                code: OxcCode {
+                    scope: None,
+                    number: None,
+                },
+                url: None,
+            },
+        },
+    ],
+}

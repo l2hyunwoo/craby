@@ -1,21 +1,22 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, time::Instant};
 
 use craby_codegen::{
+    codegen,
     constants::GENERATED_COMMENT,
     generators::{
         android_generator::AndroidGenerator, cxx_generator::CxxGenerator,
         ios_generator::IosGenerator, rs_generator::RsGenerator, types::GeneratorInvoker,
     },
-    types::{schema::Schema, types::Project},
+    types::CodegenContext,
 };
 use craby_common::{config::load_config, env::is_initialized};
 use log::{debug, info};
+use owo_colors::OwoColorize;
 
 use crate::utils::{file::write_file, schema::print_schema};
 
 pub struct CodegenOptions {
     pub project_root: PathBuf,
-    pub schemas: Vec<String>,
 }
 
 pub fn perform(opts: CodegenOptions) -> anyhow::Result<()> {
@@ -23,27 +24,33 @@ pub fn perform(opts: CodegenOptions) -> anyhow::Result<()> {
         anyhow::bail!("Craby project is not initialized. Please run `craby init` first.");
     }
 
-    info!("{} module schema(s) found", opts.schemas.len());
-
     let config = load_config(&opts.project_root)?;
-    let schemas = opts
-        .schemas
-        .iter()
-        .enumerate()
-        .map(|(i, schema)| {
-            let schema = serde_json::from_str::<Schema>(&schema)?;
-            info!(
-                "Preparing for {} module... ({}/{})",
-                schema.module_name,
-                i + 1,
-                opts.schemas.len()
-            );
-            print_schema(&schema)?;
-            Ok(schema)
-        })
-        .collect::<Result<Vec<Schema>, anyhow::Error>>()?;
+    let start_time = Instant::now();
 
-    let project = Project {
+    info!(
+        "Collecting source files... {}",
+        format!("({})", config.source_dir.display()).dimmed()
+    );
+    let schemas = codegen(craby_codegen::CodegenOptions {
+        project_root: &opts.project_root,
+        source_dir: &config.source_dir,
+    })?;
+    let total_schemas = schemas.len();
+    info!("{} module schema(s) found", total_schemas);
+
+    // Print schema for each module
+    for (i, schema) in schemas.iter().enumerate() {
+        info!(
+            "Found module: {} ({}/{})",
+            schema.module_name,
+            i + 1,
+            total_schemas,
+        );
+        print_schema(schema)?;
+        println!();
+    }
+
+    let ctx = CodegenContext {
         name: config.project.name,
         root: opts.project_root,
         schemas,
@@ -61,7 +68,7 @@ pub fn perform(opts: CodegenOptions) -> anyhow::Result<()> {
     generators
         .iter()
         .try_for_each(|generator| -> Result<(), anyhow::Error> {
-            generate_res.extend(generator.invoke_generate(&project)?);
+            generate_res.extend(generator.invoke_generate(&ctx)?);
             Ok(())
         })?;
 
@@ -86,8 +93,12 @@ pub fn perform(opts: CodegenOptions) -> anyhow::Result<()> {
             Ok(())
         })?;
 
+    let elapsed = start_time.elapsed().as_millis();
     info!("{} files generated", wrote_cnt);
-    info!("Codegen completed successfully 🎉");
+    info!(
+        "Codegen completed successfully 🎉 {}",
+        format!("({}ms)", elapsed).dimmed()
+    );
 
     Ok(())
 }
