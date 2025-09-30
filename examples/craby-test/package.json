@@ -42,7 +42,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check",
     "clean": "del-cli android/build example/android/build example/android/app/build example/ios/build lib",
-    "build": "crabygen build && tsdown"
+    "build": "craby build && tsdown"
   },
   "keywords": [
     "react-native",

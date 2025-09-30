@@ -5894,6 +5894,7 @@ __metadata:
     tsdown: "npm:^0.15.5"
     typescript: "npm:^5.9.2"
   bin:
+    craby: ./bin-craby.js
     crabygen: ./bin.js
   languageName: unknown
   linkType: soft

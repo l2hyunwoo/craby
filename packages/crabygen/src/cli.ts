@@ -7,15 +7,8 @@ import { command as doctorCommand } from './commands/doctor';
 import { command as initCommand } from './commands/init';
 import { command as showCommand } from './commands/show';
 
-export function run() {
-  const cli = program.name('crabygen').version(version);
-
-  cli.argument('[command]', 'command to run').action((command) => {
-    // Codegen is the default command
-    if (command == null) {
-      runCodegen();
-    }
-  });
+export function run(baseCommand: string) {
+  const cli = program.name(baseCommand).version(version);
 
   cli.addCommand(codegenCommand);
   cli.addCommand(initCommand);
@@ -23,6 +16,15 @@ export function run() {
   cli.addCommand(showCommand);
   cli.addCommand(doctorCommand);
   cli.addCommand(cleanCommand);
+
+  cli.argument('[args...]', 'optional arguments').action((args) => {
+    if (args && args.length > 0) {
+      console.error(`error: unknown command '${args[0]}'`);
+      cli.help();
+    } else {
+      runCodegen();
+    }
+  });
 
   cli.parse();
 }
