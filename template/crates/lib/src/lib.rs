@@ -3,5 +3,3 @@
 pub(crate) mod ffi;
 pub(crate) mod generated;
 pub(crate) mod types;
-
-pub(crate) mod {{ snake_name }}_impl;

@@ -14,7 +14,7 @@ pub fn print_schema(schema: &Schema) -> Result<(), anyhow::Error> {
         .iter()
         .enumerate()
         .try_for_each(|(i, method)| -> Result<(), anyhow::Error> {
-            match method.as_impl_sig() {
+            match method.try_into_impl_sig() {
                 Ok(method_sig) => {
                     if i == schema.methods.len() - 1 {
                         print!("│   └─ ");

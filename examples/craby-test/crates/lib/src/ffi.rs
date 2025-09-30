@@ -88,7 +88,6 @@ pub mod bridging {
         fn craby_test_trigger_signal(id_: usize);
     }
 
-
     #[namespace = "craby::signals"]
     unsafe extern "C++" {
         include!("signals.h");

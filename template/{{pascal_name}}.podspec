@@ -15,8 +15,11 @@ Pod::Spec.new do |s|
 
   s.source_files = ["ios/**/*.{{{{raw}}}}{h,m,mm,cc,cpp}{{{{/raw}}}}", "cpp/**/*.{{{{raw}}}}{hpp,cpp}{{{{/raw}}}}"]
   s.private_header_files = "ios/include/*.h"
-
   s.vendored_frameworks = "ios/framework/lib{{ flat_name }}.xcframework"
+
+  s.pod_target_xcconfig = {
+    "CLANG_CXX_LANGUAGE_STANDARD" => "c++20",
+  }
 
   install_modules_dependencies(s)
 end

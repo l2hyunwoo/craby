@@ -209,12 +209,12 @@ impl TypeAnnotation {
 }
 
 impl Method {
-    pub fn as_impl_sig(&self) -> Result<String, anyhow::Error> {
+    pub fn try_into_impl_sig(&self) -> Result<String, anyhow::Error> {
         let return_type = self.ret_type.as_rs_impl_type()?.0;
         let params_sig = self
             .params
             .iter()
-            .map(|param| param.as_impl_sig())
+            .map(|param| param.try_into_impl_sig())
             .collect::<Result<Vec<_>, _>>()
             .map(|params| params.join(", "))?;
 
@@ -235,12 +235,12 @@ impl Method {
 }
 
 impl Param {
-    pub fn as_cxx_sig(&self) -> Result<String, anyhow::Error> {
+    pub fn try_into_cxx_sig(&self) -> Result<String, anyhow::Error> {
         let param_type = self.type_annotation.as_rs_type()?.0;
         Ok(format!("{}: {}", self.name, param_type))
     }
 
-    pub fn as_impl_sig(&self) -> Result<String, anyhow::Error> {
+    pub fn try_into_impl_sig(&self) -> Result<String, anyhow::Error> {
         let param_type = self.type_annotation.as_rs_impl_type()?.0;
         Ok(format!("{}: {}", self.name, param_type))
     }
@@ -320,7 +320,7 @@ impl Schema {
                 let params_sig = method_spec
                     .params
                     .iter()
-                    .map(|param| param.as_cxx_sig())
+                    .map(|param| param.try_into_cxx_sig())
                     .collect::<Result<Vec<_>, _>>()
                     .map(|mut params| {
                         params.insert(0, format!("{}: usize", RESERVED_ARG_NAME_ID));
@@ -441,7 +441,7 @@ impl Schema {
         })
     }
 
-    pub fn as_rs_type_impls(
+    pub fn try_collect_type_impls(
         &self,
         type_impls: &mut BTreeMap<String, String>,
     ) -> Result<(), anyhow::Error> {

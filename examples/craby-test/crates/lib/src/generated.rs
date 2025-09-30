@@ -3,11 +3,9 @@
 use crate::ffi::bridging::*;
 use crate::types::*;
 
-
 pub trait CalculatorSpec {
     fn new(id: usize) -> Self;
     fn id(&self) -> usize;
-
     fn add(&self, a: Number, b: Number) -> Number;
     fn subtract(&self, a: Number, b: Number) -> Number;
     fn multiply(&self, a: Number, b: Number) -> Number;

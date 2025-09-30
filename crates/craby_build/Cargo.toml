@@ -10,7 +10,6 @@ repository = "https://github.com/leegeunhyeok/craby"
 [dependencies]
 craby_codegen = { path = "../craby_codegen" }
 craby_common  = { path = "../craby_common" }
-cxx-build     = { workspace = true }
 log           = { workspace = true }
 anyhow        = { workspace = true }
 owo-colors    = { workspace = true }

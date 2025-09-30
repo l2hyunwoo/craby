@@ -15,9 +15,11 @@ Pod::Spec.new do |s|
 
   s.source_files = ["ios/**/*.{h,m,mm,cc,cpp}", "cpp/**/*.{hpp,cpp}"]
   s.private_header_files = "ios/include/*.h"
-
-  # TODO: Auto configure xcframework path
   s.vendored_frameworks = "ios/framework/libcrabytest.xcframework"
+
+  s.pod_target_xcconfig = {
+    "CLANG_CXX_LANGUAGE_STANDARD" => "c++20",
+  }
 
   install_modules_dependencies(s)
 end

@@ -69,8 +69,7 @@ impl RsTemplate {
             r#"
             extern "Rust" {{
             {cxx_extern}
-            }}
-            "#,
+            }}"#,
             cxx_extern = indent_str(cxx_extern.join("\n\n"), 4),
         };
 
@@ -126,16 +125,16 @@ impl RsTemplate {
     /// ```
     fn rs_spec(&self, schema: &Schema) -> Result<String, anyhow::Error> {
         let trait_name = pascal_case(format!("{}Spec", schema.module_name).as_str());
-        let methods = schema
+        let mut methods = schema
             .methods
             .iter()
             .map(|spec| -> Result<String, anyhow::Error> {
-                let sig = spec.as_impl_sig()?;
+                let sig = spec.try_into_impl_sig()?;
                 Ok(format!("{};", sig))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let (signal_enum, emit_impl) = if schema.signals.len() > 0 {
+        let signal_enum = if schema.signals.len() > 0 {
             let signal_enum_name = format!("{}Signal", schema.module_name);
             let (signal_members, pattern_matches): (Vec<String>, Vec<String>) = schema
                 .signals
@@ -176,25 +175,25 @@ impl RsTemplate {
                 pattern_matches = indent_str(pattern_matches.join("\n"), 8),
             };
 
-            (signal_enum, emit_impl)
+            methods.insert(0, emit_impl);
+
+            signal_enum
         } else {
-            (String::new(), String::new())
+            String::new()
         };
 
-        let content = formatdoc! {
+        let spec_trait = formatdoc! {
             r#"
-            {signal_enum}
             pub trait {trait_name} {{
                 fn new(id: usize) -> Self;
                 fn id(&self) -> usize;
-            {emit_impl}
             {methods}
             }}"#,
             trait_name = trait_name,
-            signal_enum = signal_enum,
-            emit_impl = indent_str(emit_impl, 4),
             methods = indent_str(methods.join("\n"), 4),
         };
+
+        let content = [spec_trait, signal_enum].join("\n\n");
 
         Ok(content)
     }
@@ -202,12 +201,26 @@ impl RsTemplate {
     fn rs_impl(&self, schema: &Schema) -> Result<String, anyhow::Error> {
         let mod_name = pascal_case(schema.module_name.as_str());
         let trait_name = pascal_case(format!("{}Spec", schema.module_name).as_str());
-
+        let default_methods = vec![
+            formatdoc! {
+                r#"
+                fn new(id: usize) -> Self {{
+                    {mod_name} {{ id }}
+                }}"#,
+                mod_name = mod_name,
+            },
+            formatdoc! {
+                r#"
+                fn id(&self) -> usize {{
+                    self.id
+                }}"#,
+            },
+        ];
         let methods = schema
             .methods
             .iter()
             .map(|spec| -> Result<String, anyhow::Error> {
-                let func_sig = spec.as_impl_sig()?;
+                let func_sig = spec.try_into_impl_sig()?;
 
                 // ```rust,ignore
                 // fn multiply(a: Number, b: Number) -> Number {
@@ -250,19 +263,11 @@ impl RsTemplate {
             }};
 
             impl {trait_name} for {mod_name} {{
-                fn new(id: usize) -> Self {{
-                    {mod_name} {{ id }}
-                }}
-
-                fn id(&self) -> usize {{
-                    self.id
-                }}
-
             {methods}
             }}"#,
             trait_name = trait_name,
             mod_name= mod_name,
-            methods = indent_str(methods.join("\n\n"), 4),
+            methods = indent_str([default_methods, methods].concat().join("\n\n"), 4),
         };
 
         Ok(content)
@@ -423,7 +428,7 @@ impl RsTemplate {
                 let spec = self.rs_spec(schema)?;
 
                 // Collect the type implementations
-                schema.as_rs_type_impls(&mut type_aliases)?;
+                schema.try_collect_type_impls(&mut type_aliases)?;
 
                 spec_codes.push(spec);
 

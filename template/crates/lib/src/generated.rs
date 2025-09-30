@@ -3,7 +3,7 @@
 use crate::ffi::bridging::*;
 use crate::types::*;
 
-pub trait {{ module_name }}Spec {
+pub trait {{ pascal_name }}Spec {
     fn new(id: usize) -> Self;
     fn id(&self) -> usize;
 }
