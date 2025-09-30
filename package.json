@@ -2,14 +2,19 @@
   "name": "craby",
   "workspaces": [
     "examples/*",
-    "packages/*"
+    "packages/*",
+    "template"
   ],
   "scripts": {
-    "script:version": "./scripts/version.sh"
+    "lint:all": "biome check packages/*",
+    "lint:fix": "biome check packages/* --write"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.2.4",
     "@types/node": "^22",
-    "typescript": "^5.8.3"
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.2",
+    "zx": "^8.8.4"
   },
   "resolutions": {
     "rollup": "npm:@rollup/wasm-node@4.46.2"

@@ -1,73 +1,80 @@
 use handlebars::Handlebars;
-use log::{debug, warn};
-use owo_colors::OwoColorize;
+use log::debug;
 use std::{
     collections::BTreeMap,
     fs::{self, File},
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
 };
 use walkdir::WalkDir;
 
 pub fn render_template(
-    template_dir: &Path,
     dest_dir: &Path,
-    data: &BTreeMap<&str, &str>,
+    template_dir: &Path,
+    template_data: &BTreeMap<&str, &str>,
 ) -> anyhow::Result<()> {
     let reg = Handlebars::new();
 
     debug!(
-        "Generating template from {:?} to {:?}",
-        template_dir, dest_dir
+        "Rendering template {:?} with data {:#?}",
+        template_dir, template_data
     );
-    debug!("Template data: {:?}", data);
 
     for entry in WalkDir::new(template_dir) {
         let entry = entry?;
         let path = entry.path();
+        let base_bath = replace_path(&path, template_data, true);
+        let target_path = replace_path(&path, template_data, false);
 
-        let rel_path = path.strip_prefix(template_dir)?;
-        let replaced_path = replace_path(&rel_path, data);
-        let rendered_rel_path = reg.render_template(replaced_path.as_str(), data)?;
-        let dest_path = dest_dir.join(
-            rendered_rel_path
-                .strip_suffix(".hbs")
-                .unwrap_or(&rendered_rel_path),
-        );
-
-        if dest_path.exists() && !dest_path.is_dir() {
-            warn!(
-                "Skipped generating {:?} because the file already exists",
-                dest_path.to_string_lossy().dimmed()
-            );
-            continue;
+        if base_bath != target_path {
+            debug!("Renaming {:?} to {:?}", base_bath, target_path);
+            fs::rename(&base_bath, &target_path)?;
         }
 
-        if path.is_dir() {
-            fs::create_dir_all(&dest_path)?;
-        } else {
-            let content = fs::read_to_string(path)?;
-            let rendered: String = reg.render_template(&content, data)?;
+        if target_path.is_dir() {
+            fs::create_dir_all(&target_path)?;
+        } else if target_path.is_file() {
+            debug!("Processing {:?}", target_path);
+            let content = fs::read_to_string(&target_path)?;
+            let rendered = reg.render_template(&content, template_data)?;
 
-            if let Some(parent) = dest_path.parent() {
+            if let Some(parent) = target_path.parent() {
                 fs::create_dir_all(parent)?;
             }
 
-            let mut file = File::create(&dest_path)?;
+            let mut file = File::create(&target_path)?;
             file.write_all(rendered.as_bytes())?;
         }
     }
 
+    fs::rename(&template_dir, &dest_dir)?;
+
     Ok(())
 }
 
-fn replace_path(path: &Path, data: &BTreeMap<&str, &str>) -> String {
-    let mut result = path.to_string_lossy().to_string();
+fn replace_path(
+    path: &Path,
+    template_data: &BTreeMap<&str, &str>,
+    keep_base_name: bool,
+) -> PathBuf {
+    if keep_base_name {
+        let base_name = path.file_name().unwrap().to_string_lossy().to_string();
+        let mut parent = path.parent().unwrap().to_string_lossy().to_string();
 
-    for (key, value) in data {
-        // Replace '{{key}}' with value
-        result = result.replace(format!("{{{{{key}}}}}", key = key).as_str(), value);
+        for (key, value) in template_data {
+            // Replace '{{key}}' with given value
+            parent = parent.replace(format!("{{{{{key}}}}}", key = key).as_str(), value);
+        }
+
+        PathBuf::from(parent).join(base_name)
+    } else {
+        let mut result = path.to_string_lossy().to_string();
+
+        for (key, value) in template_data {
+            // Replace '{{key}}' with given value
+            result = result.replace(format!("{{{{{key}}}}}", key = key).as_str(), value);
+        }
+
+        PathBuf::from(result)
     }
-
-    result
 }

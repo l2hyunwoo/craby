@@ -1,4 +1,5 @@
-import { Registry, type Module, type Signal } from 'craby-modules';
+import type { NativeModule, Signal } from 'craby-modules';
+import { NativeModuleRegistry } from 'craby-modules';
 
 export interface TestObject {
   foo: string;
@@ -26,7 +27,7 @@ export enum SwitchState {
   On = 1,
 }
 
-export interface Spec extends Module {
+export interface Spec extends NativeModule {
   numericMethod(arg: number): number;
   booleanMethod(arg: boolean): boolean;
   stringMethod(arg: string): string;
@@ -40,4 +41,4 @@ export interface Spec extends Module {
   triggerSignal(): void;
 }
 
-export default Registry.getEnforcing<Spec>('CrabyTest');
+export default NativeModuleRegistry.getEnforcing<Spec>('CrabyTest');

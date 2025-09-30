@@ -1,34 +1,75 @@
 use std::{collections::BTreeMap, fs, path::PathBuf};
 
-use crate::{
-    commands::init::validators,
-    utils::{template::render_template, terminal::with_spinner},
+use crate::utils::{
+    git::{clone_template, is_git_available},
+    template::render_template,
+    terminal::with_spinner,
 };
+use chrono::Datelike;
 use craby_build::setup::setup_project;
-use craby_codegen::{
-    codegen,
-    constants::{cxx_mod_cls_name, objc_mod_provider_name},
-};
+use craby_codegen::constants::{cxx_mod_cls_name, objc_mod_provider_name};
 use craby_common::{
     env::is_rustup_installed,
-    utils::string::{flat_case, kebab_case, snake_case},
+    utils::string::{flat_case, kebab_case, pascal_case, snake_case},
 };
-use inquire::Text;
-use log::{debug, info, warn};
+use inquire::{validator::Validation, Text};
+use log::{info, warn};
 use owo_colors::OwoColorize;
 
 pub struct InitOptions {
-    pub project_root: PathBuf,
-    pub template_base_path: PathBuf,
-    pub package_name: String,
+    pub cwd: PathBuf,
+    pub pkg_name: String,
 }
 
 pub fn perform(opts: InitOptions) -> anyhow::Result<()> {
+    let dest_dir = opts.cwd.join(&opts.pkg_name);
+    if fs::exists(&dest_dir)? {
+        anyhow::bail!("{} directory already exists", dest_dir.display());
+    }
+
+    if is_git_available() == false {
+        anyhow::bail!("Git command is not available. Please install Git and try again.");
+    }
+
+    let non_empty_validator = |input: &str| {
+        if input.trim().is_empty() {
+            Ok(Validation::Invalid("This field is required.".into()))
+        } else {
+            Ok(Validation::Valid)
+        }
+    };
+
+    let email_validator = |input: &str| {
+        if email_address::EmailAddress::is_valid(input) {
+            Ok(Validation::Valid)
+        } else {
+            Ok(Validation::Invalid("Invalid email address.".into()))
+        }
+    };
+
+    let url_validator = |input: &str| {
+        if url::Url::parse(input).is_ok() {
+            Ok(Validation::Valid)
+        } else {
+            Ok(Validation::Invalid("Invalid URL.".into()))
+        }
+    };
+
     // eg. fast_calculator
-    let crate_name = snake_case(&opts.package_name);
-    let crate_name = Text::new("Enter the crate name")
-        .with_default(&crate_name)
-        .with_validator(validators::CrateNameValidator)
+    let crate_name = snake_case(&opts.pkg_name);
+    let description = Text::new("Enter a description of the package:")
+        .with_validator(non_empty_validator)
+        .prompt()?;
+    let author_name = Text::new("Author name:")
+        .with_validator(non_empty_validator)
+        .prompt()?;
+    let author_email = Text::new("Author email:")
+        .with_validator(non_empty_validator)
+        .with_validator(email_validator)
+        .prompt()?;
+    let repository_url = Text::new("Repository URL:")
+        .with_validator(non_empty_validator)
+        .with_validator(url_validator)
         .prompt()?;
 
     // CxxFastCalculatorModule
@@ -37,105 +78,58 @@ pub fn perform(opts: InitOptions) -> anyhow::Result<()> {
     // fastcalculator
     let flat_name = flat_case(&crate_name);
 
+    // fast_calculator
+    let snake_name = snake_case(&crate_name);
+
     // fast-calculator
     let kebab_name = kebab_case(&crate_name);
 
-    // FastCalculatorModuleProvider
-    let objc_provider_name = objc_mod_provider_name(&crate_name);
+    // FastCalculator
+    let pascal_name = pascal_case(&crate_name);
 
-    let root_template = opts.template_base_path.join("root");
-    let crates_template = opts.template_base_path.join("crates");
-    let cxx_template = opts.template_base_path.join("cpp");
-    let android_template = opts.template_base_path.join("android");
-    let ios_template = opts.template_base_path.join("ios");
+    // FastCalculatorModuleProvider
+    let objc_provider = objc_mod_provider_name(&crate_name);
+    let current_year = chrono::Local::now().year().to_string();
+
     let template_data = BTreeMap::from([
+        ("pkg_name", opts.pkg_name.as_str()),
+        ("description", description.as_str()),
+        ("author_name", author_name.as_str()),
+        ("author_email", author_email.as_str()),
+        ("repository_url", repository_url.as_str()),
         ("crate_name", crate_name.as_str()),
         ("flat_name", flat_name.as_str()),
+        ("snake_name", snake_name.as_str()),
         ("kebab_name", kebab_name.as_str()),
+        ("pascal_name", pascal_name.as_str()),
         ("cxx_name", cxx_name.as_str()),
-        ("objc_provider_name", objc_provider_name.as_str()),
+        ("objc_provider", objc_provider.as_str()),
+        ("year", current_year.as_str()),
     ]);
 
-    fs::create_dir_all(opts.project_root.join(".craby"))?;
-    render_template(&root_template, &opts.project_root, &template_data)?;
-    render_template(
-        &crates_template,
-        &opts.project_root.join("crates"),
-        &template_data,
-    )?;
-    render_template(
-        &android_template,
-        &opts.project_root.join("android"),
-        &template_data,
-    )?;
-    render_template(
-        &ios_template,
-        &opts.project_root.join("ios"),
-        &template_data,
-    )?;
-
-    let default_source_dir = opts.project_root.join("src");
-    let schemas = codegen(craby_codegen::CodegenOptions {
-        project_root: &opts.project_root,
-        source_dir: &default_source_dir,
+    with_spinner("⏳ Cloning template...", |_| {
+        let template_dir = clone_template()?;
+        render_template(&dest_dir, &template_dir, &template_data)?;
+        Ok(())
     })?;
-
-    // Generate C++ code for each TurboModule schema
-    schemas.into_iter().try_for_each(|schema| {
-        let mut cxx_template_data = template_data.clone();
-        cxx_template_data.insert("turbo_module_name", schema.module_name.as_str());
-        render_template(
-            &cxx_template,
-            &opts.project_root.join("cpp"),
-            &cxx_template_data,
-        )?;
-        Ok::<(), anyhow::Error>(())
-    })?;
-
-    info!("Template generation completed");
-
-    let gitignore = opts.project_root.join(".gitignore");
-    if gitignore.exists() {
-        let content = fs::read_to_string(&gitignore)?;
-        let mut append_contents = vec![];
-
-        if !content.contains("target/") {
-            append_contents.push("target/".to_string());
-        }
-
-        if !content.contains(".craby") {
-            append_contents.push(".craby".to_string());
-            debug!("`.craby` directory added to .gitignore");
-        }
-
-        if append_contents.len() > 0 {
-            debug!("{} added to .gitignore", append_contents.join(", "));
-            fs::write(
-                &gitignore,
-                format!("{}\n\n# Craby\n{}", content, append_contents.join("\n")),
-            )?;
-        }
-    } else {
-        fs::write(&gitignore, "# Craby\n.craby\ntarget/\n")?;
-    }
+    info!("✅ Template generation completed");
 
     if is_rustup_installed() {
-        info!("Setting up the Rust project");
-        with_spinner("Setting up the project, please wait...", |_| {
+        with_spinner("⚙️ Setting up the Rust project, please wait...", |_| {
             setup_project()?;
             Ok(())
         })?;
-        info!("Rust project setup completed");
+        info!("✅ Rust project setup completed");
     } else {
         warn!(
-            "Please install Rustup to setup the Rust project for Craby\n\nVisit the Rust website: {}",
+            "⚠️ Please install Rustup to setup the Rust project for Craby\n\nVisit the Rust website: {}",
             "https://www.rust-lang.org/tools/install".underline()
         );
     }
 
     info!(
-        "Craby project initialized successfully 🎉\n\nRun `{}` to generate Rust code from your TurboModule specifications",
-        "craby codegen".green().underline()
+        "🎉 Craby project initialized successfully\n\nRun `{}` to generate Rust code from your native module specifications",
+        "npx crabygen".green().underline()
     );
 
     Ok(())
