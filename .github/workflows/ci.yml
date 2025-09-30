@@ -138,7 +138,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-${{ matrix.settings.target }}
-          path: ${{ env.APP_NAME }}.*.node
+          path: ${{ env.PACKAGE_PATH }}/${{ env.APP_NAME }}.*.node
           if-no-files-found: error
 
   test-macOS-windows-binding:
@@ -178,7 +178,7 @@ jobs:
         uses: actions/download-artifact@v5
         with:
           name: bindings-${{ matrix.settings.target }}
-          path: ${{ env.PACKAGE_PATH }}/artifacts
+          path: ${{ env.PACKAGE_PATH }}
       - name: List packages
         run: ls -R ${{ env.PACKAGE_PATH }}
         shell: bash
@@ -241,7 +241,7 @@ jobs:
         uses: actions/download-artifact@v5
         with:
           name: bindings-${{ matrix.target }}
-          path: ${{ env.PACKAGE_PATH }}/napi
+          path: ${{ env.PACKAGE_PATH }}
       - name: List packages
         run: ls -R ${{ env.PACKAGE_PATH }}
         shell: bash
@@ -316,7 +316,7 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v5
         with:
-          path: ${{ env.PACKAGE_PATH }}/napi
+          path: ${{ env.PACKAGE_PATH }}/artifacts
       - name: Move artifacts
         run: yarn workspace ${{ env.PACKAGE_NAME }} artifacts
       - name: List packages

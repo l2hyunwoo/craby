@@ -1,4 +1,4 @@
-use crate::utils::{collect_packages, is_valid_version, update_package_version};
+use crate::utils::{collect_packages, is_valid_version, run_command, update_package_version};
 use anyhow::Result;
 use std::env;
 
@@ -17,6 +17,9 @@ pub fn run() -> Result<()> {
     for package_info in &packages {
         update_package_version(package_info, &version)?;
     }
+
+    println!("Building napi package for prebuilt JS bundles...");
+    run_command("yarn", &["workspace", "@craby/cli-bindings", "build"], None)?;
 
     println!(
         r#"
