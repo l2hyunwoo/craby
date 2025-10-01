@@ -1,6 +1,6 @@
 <div align="center">
 
-<img width="360" src="./logo.png" alt="logo">
+<img width="360" src="./logo.svg" alt="logo">
 
 # craby
 
