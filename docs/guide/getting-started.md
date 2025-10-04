@@ -21,8 +21,7 @@ Before you begin, make sure you have the following installed:
 - **Android NDK**: [Download](https://developer.android.com/ndk/downloads)
 
 ```bash
-# Set `ANDROID_HOME` and `ANDROID_NDK_HOME`
-export ANDROID_HOME=/path/to/android-sdk
+# Set `ANDROID_NDK_HOME` environment variable
 export ANDROID_NDK_HOME=/path/to/android-ndk
 ```
 

@@ -44,13 +44,6 @@ pub fn perform(opts: DoctorOptions) -> anyhow::Result<()> {
 
     println!("\n{}", "Android".bold().dimmed());
     assert_with_status(
-        "Environment variable `ANDROID_HOME`",
-        || match std::env::var("ANDROID_HOME") {
-            Ok(_) => Ok(Status::Ok),
-            Err(e) => Ok(Status::Warn(e.to_string())),
-        },
-    );
-    assert_with_status(
         "Environment variable `ANDROID_NDK_HOME`",
         || match std::env::var("ANDROID_NDK_HOME") {
             Ok(_) => Ok(Status::Ok),
