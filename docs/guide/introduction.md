@@ -76,14 +76,20 @@ impl CalculatorSpec for Calculator {
 
 ```mermaid
 graph LR
-    A[Rust] <--> B[Rust Bindings]
+    A[Rust<br>Implementations] <--> B[Rust Bindings]
     B <.-> |C ABI| C[C++ Bindings]
-    C <--> D[C++]
+    C <--> D
 
     subgraph cxx["via cxx"]
         B
         C
     end
+
+    subgraph cpp["C++ TurboModule"]
+        D[shared_ptr&ltT&gt]
+    end
+
+    D <-.-> |Shared Instance| A
 ```
 
 1. **Codegen from TypeScript**: Generate code based on TypeScript NativeModule specifications
