@@ -26,7 +26,7 @@ pub fn run() -> Result<()> {
 To publish, commit changes and push:
 
 git add -A
-git commit -m "{}"
+git commit -m "chore: release v{}"
 "#,
         version
     );

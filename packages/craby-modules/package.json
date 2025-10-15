@@ -1,6 +1,6 @@
 {
   "name": "craby-modules",
-  "version": "0.1.0-alpha.9",
+  "version": "0.1.0-alpha.10",
   "packageManager": "yarn@4.9.2",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
