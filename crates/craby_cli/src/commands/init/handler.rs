@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
 use crate::{
-    commands::init::{npm::get_latest_version, react_native::setup_react_native_project},
+    commands::init::react_native::setup_react_native_project,
     utils::{
         git::{clone_template, is_git_available},
         template::render_template,
@@ -101,26 +101,8 @@ pub fn perform(opts: InitOptions) -> anyhow::Result<()> {
     let objc_provider = objc_mod_provider_name(&crate_name);
     let current_year = chrono::Local::now().year().to_string();
 
-    let mut pkg_version = String::new();
-    with_spinner(
-        "Getting latest package version...",
-        |_| match get_latest_version() {
-            Ok(res) => {
-                pkg_version = res;
-                Ok(())
-            }
-            Err(e) => anyhow::bail!("Failed to get latest package version: {}", e),
-        },
-    )?;
-    info!(
-        "{} Found latest package version: {}",
-        STATUS_OK.bold().green(),
-        pkg_version
-    );
-
     let template_data = BTreeMap::from([
         ("pkg_name", opts.pkg_name.as_str()),
-        ("pkg_version", pkg_version.as_str()),
         ("description", description.as_str()),
         ("author_name", author_name.as_str()),
         ("author_email", author_email.as_str()),
