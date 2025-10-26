@@ -50,7 +50,7 @@ export default withMermaid(
       },
       footer: {
         message: 'Released under the MIT License.',
-        copyright: 'Copyright © 2025 Geunhyeok Lee',
+        copyright: `Copyright © ${new Date().getFullYear()} Geunhyeok Lee`,
       },
     },
   }),
