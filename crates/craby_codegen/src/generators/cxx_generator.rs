@@ -371,9 +371,9 @@ impl CxxTemplate {
             module_name = pascal_case(&schema.module_name),
             flat_name = flat_name,
             cxx_mod = cxx_mod,
-            register_stmt = indent_str(register_stmt, 2),
-            unregister_stmt = indent_str(unregister_stmt, 2),
-            method_maps = indent_str(method_maps.join("\n"), 2),
+            register_stmt = indent_str(&register_stmt, 2),
+            unregister_stmt = indent_str(&unregister_stmt, 2),
+            method_maps = indent_str(&method_maps.join("\n"), 2),
             method_impls = method_impls.join("\n\n"),
         };
 
@@ -410,7 +410,7 @@ impl CxxTemplate {
             module_name = pascal_case(&schema.module_name),
             flat_name = flat_name,
             cxx_mod = cxx_mod,
-            method_defs = indent_str(method_defs.join("\n\n"), 2),
+            method_defs = indent_str(&method_defs.join("\n\n"), 2),
         };
 
         // ```cpp
@@ -595,11 +595,11 @@ impl CxxTemplate {
     ///
     /// class ThreadPool {
     /// private:
-    ///   std::vector<std::thread> workers;
-    ///   std::queue<std::function<void()>> tasks;
+    ///   bool stop;
     ///   std::mutex mutex;
     ///   std::condition_variable condition;
-    ///   bool stop;
+    ///   std::queue<std::function<void()>> tasks;
+    ///   std::vector<std::thread> workers;
     /// }
     ///
     /// public:
@@ -656,14 +656,7 @@ impl CxxTemplate {
     ///   }
     ///
     ///   ~ThreadPool() {
-    ///     {
-    ///       std::unique_lock<std::mutex> lock(mutex);
-    ///       stop = true;
-    ///     }
-    ///     condition.notify_all();
-    ///     for (std::thread &worker : workers) {
-    ///       worker.join();
-    ///     }
+    ///     shutdown();
     ///   }
     /// };
     ///
@@ -694,11 +687,11 @@ impl CxxTemplate {
 
             class ThreadPool {{
             private:
-              std::vector<std::thread> workers;
-              std::queue<std::function<void()>> tasks;
+              bool stop;
               std::mutex mutex;
               std::condition_variable condition;
-              bool stop;
+              std::queue<std::function<void()>> tasks;
+              std::vector<std::thread> workers;
 
             public:
               ThreadPool(size_t num_threads = 10) : stop(false) {{
@@ -755,14 +748,7 @@ impl CxxTemplate {
               }}
 
               ~ThreadPool() {{
-                {{
-                  std::unique_lock<std::mutex> lock(mutex);
-                  stop = true;
-                }}
-                condition.notify_all();
-                for (std::thread &worker : workers) {{
-                  worker.join();
-                }}
+                shutdown();
               }}
             }};
 

@@ -1,27 +1,50 @@
-use std::collections::{btree_map::Entry, BTreeMap};
+use std::collections::{
+    btree_map::Entry as BTreeMapEntry, hash_map::Entry as HashMapEntry, BTreeMap,
+};
 
 use craby_common::utils::string::{camel_case, pascal_case, snake_case};
 use indoc::formatdoc;
 use rustc_hash::FxHashMap;
 
 use crate::{
+    common::IntoCode,
     constants::specs::RESERVED_ARG_NAME_MODULE,
     parser::types::{
         EnumTypeAnnotation, Method, ObjectTypeAnnotation, Param, RefTypeAnnotation, TypeAnnotation,
     },
-    platform::rust::template::{as_struct_def, collect_alias_default_impls, enum_default_impl},
+    platform::rust::template::{
+        collect_alias_default_impls, RsDefaultImpl, RsNullableStruct, RsStruct,
+    },
     types::Schema,
     utils::indent_str,
 };
 
 #[derive(Debug)]
-pub struct RsType(pub String);
+pub struct RsType(String);
+
+impl IntoCode for RsType {
+    fn into_code(self) -> String {
+        self.0
+    }
+}
 
 #[derive(Debug)]
-pub struct RsBridgeType(pub String);
+pub struct RsBridgeType(String);
+
+impl IntoCode for RsBridgeType {
+    fn into_code(self) -> String {
+        self.0
+    }
+}
 
 #[derive(Debug)]
 pub struct RsImplType(pub String);
+
+impl IntoCode for RsImplType {
+    fn into_code(self) -> String {
+        self.0
+    }
+}
 
 /// Collection of Rust code for FFI.
 #[derive(Debug, Clone)]
@@ -101,12 +124,15 @@ impl TypeAnnotation {
                         element_type
                     ));
                 }
-                format!("Vec<{}>", element_type.as_rs_type()?.0)
+                format!("Vec<{}>", element_type.as_rs_type()?.into_code())
             }
             TypeAnnotation::Object(ObjectTypeAnnotation { name, .. }) => name.clone(),
             TypeAnnotation::Enum(EnumTypeAnnotation { name, .. }) => name.clone(),
             TypeAnnotation::Promise(resolve_type) => {
-                format!("Result<{}, anyhow::Error>", resolve_type.as_rs_type()?.0)
+                format!(
+                    "Result<{}, anyhow::Error>",
+                    resolve_type.as_rs_type()?.into_code()
+                )
             }
             TypeAnnotation::Nullable(type_annotation) => match &**type_annotation {
                 TypeAnnotation::Boolean => "NullableBoolean".to_string(),
@@ -172,9 +198,9 @@ impl TypeAnnotation {
     pub fn as_rs_bridge_type(&self) -> Result<RsBridgeType, anyhow::Error> {
         let extern_type = match self {
             TypeAnnotation::Promise(resolve_type) => {
-                format!("Result<{}>", resolve_type.as_rs_type()?.0)
+                format!("Result<{}>", resolve_type.as_rs_type()?.into_code())
             }
-            _ => self.as_rs_type()?.0,
+            _ => self.as_rs_type()?.into_code(),
         };
 
         Ok(RsBridgeType(extern_type))
@@ -205,15 +231,15 @@ impl TypeAnnotation {
                         element_type
                     ));
                 }
-                format!("Array<{}>", element_type.as_rs_impl_type()?.0)
+                format!("Array<{}>", element_type.as_rs_impl_type()?.into_code())
             }
             TypeAnnotation::Object(ObjectTypeAnnotation { name, .. }) => name.clone(),
             TypeAnnotation::Enum(EnumTypeAnnotation { name, .. }) => name.clone(),
             TypeAnnotation::Promise(resolved_type) => {
-                format!("Promise<{}>", resolved_type.as_rs_impl_type()?.0)
+                format!("Promise<{}>", resolved_type.as_rs_impl_type()?.into_code())
             }
             TypeAnnotation::Nullable(type_annotation) => {
-                let type_annotation = type_annotation.as_rs_impl_type()?.0;
+                let type_annotation = type_annotation.as_rs_impl_type()?.into_code();
                 format!("Nullable<{}>", type_annotation)
             }
             TypeAnnotation::Ref(..) => unreachable!(),
@@ -247,7 +273,7 @@ impl TypeAnnotation {
                 format!("{}::default()", name)
             }
             TypeAnnotation::Nullable(..) => {
-                let nullable_type = self.as_rs_type()?.0;
+                let nullable_type = self.as_rs_type()?.into_code();
                 format!("{}::default()", nullable_type)
             }
             _ => {
@@ -272,7 +298,7 @@ impl Method {
     /// fn add_async(&mut self, a: Number, b: Number) -> Promise<Number>
     /// ```
     pub fn try_into_impl_sig(&self) -> Result<String, anyhow::Error> {
-        let return_type = self.ret_type.as_rs_impl_type()?.0;
+        let return_type = self.ret_type.as_rs_impl_type()?.into_code();
         let params_sig = std::iter::once("&mut self".to_string())
             .chain(
                 self.params
@@ -308,7 +334,7 @@ impl Param {
         let param_type = if let TypeAnnotation::String = &self.type_annotation {
             "&str".to_string()
         } else {
-            self.type_annotation.as_rs_type()?.0
+            self.type_annotation.as_rs_type()?.into_code()
         };
         Ok(format!("{}: {}", snake_case(&self.name), param_type))
     }
@@ -326,7 +352,7 @@ impl Param {
         let param_type = if let TypeAnnotation::String = &self.type_annotation {
             "&str".to_string()
         } else {
-            self.type_annotation.as_rs_impl_type()?.0
+            self.type_annotation.as_rs_impl_type()?.into_code()
         };
         Ok(format!("{}: {}", snake_case(&self.name), param_type))
     }
@@ -387,64 +413,32 @@ impl Schema {
         for method_spec in &self.methods {
             // Collect nullable parameters
             for param in &method_spec.params {
-                if let nullable_type @ TypeAnnotation::Nullable(type_annotation) =
-                    &param.type_annotation
-                {
-                    if struct_defs.contains_key(nullable_type) {
-                        continue;
+                if param.type_annotation.is_nullable() {
+                    let id = param.type_annotation.to_id();
+                    if let HashMapEntry::Vacant(e) = struct_defs.entry(id) {
+                        let nullable = RsNullableStruct::try_from(&param.type_annotation)?;
+                        e.insert(nullable.definition);
+                        type_impls.push(nullable.implementation);
                     }
-
-                    let struct_type = nullable_type.as_rs_bridge_type()?.0;
-                    let base_type = type_annotation.as_rs_type()?.0;
-                    let rs_impl_type = type_annotation.as_rs_impl_type()?.0;
-                    let default_val = type_annotation.as_rs_default_val()?;
-
-                    struct_defs.insert(
-                        nullable_type.clone(),
-                        formatdoc! {
-                            r#"
-                            struct {struct_type} {{
-                                null: bool,
-                                val: {base_type},
-                            }}"#,
-                            struct_type = struct_type,
-                            base_type = base_type,
-                        },
-                    );
-
-                    let nullable_impl = formatdoc! {
-                        r#"
-                        impl From<{struct_type}> for Nullable<{rs_impl_type}> {{
-                            fn from(val: {struct_type}) -> Self {{
-                                Nullable::new(if val.null {{ None }} else {{ Some(val.val) }})
-                            }}
-                        }}
-
-                        impl From<Nullable<{rs_impl_type}>> for {struct_type} {{
-                            fn from(val: Nullable<{rs_impl_type}>) -> Self {{
-                                let val = val.into_value();
-                                let null = val.is_none();
-                                {struct_type} {{
-                                    val: val.unwrap_or({default_val}),
-                                    null,
-                                }}
-                            }}
-                        }}"#,
-                        struct_type = struct_type,
-                        rs_impl_type = rs_impl_type,
-                        default_val = default_val,
-                    };
-
-                    type_impls.push(nullable_impl);
                 }
             }
 
-            let ret_type = method_spec.ret_type.as_rs_type()?.0;
+            // Collect nullable return type
+            if method_spec.ret_type.is_nullable() {
+                let id = method_spec.ret_type.to_id();
+                if let HashMapEntry::Vacant(e) = struct_defs.entry(id) {
+                    let nullable = RsNullableStruct::try_from(&method_spec.ret_type)?;
+                    e.insert(nullable.definition);
+                    type_impls.push(nullable.implementation);
+                }
+            }
+
+            let ret_type = method_spec.ret_type.as_rs_type()?.into_code();
             let ret_type = match method_spec.ret_type {
                 TypeAnnotation::Promise(_) => ret_type,
                 _ => format!("Result<{}, anyhow::Error>", ret_type),
             };
-            let ret_extern_type = method_spec.ret_type.as_rs_bridge_type()?.0;
+            let ret_extern_type = method_spec.ret_type.as_rs_bridge_type()?.into_code();
             let ret_extern_type = match method_spec.ret_type {
                 TypeAnnotation::Promise(_) => ret_extern_type,
                 _ => format!("Result<{}>", ret_extern_type),
@@ -541,13 +535,24 @@ impl Schema {
 
         // Collect alias types (struct)
         for type_annotation in &self.aliases {
-            if !struct_defs.contains_key(type_annotation) {
+            if let HashMapEntry::Vacant(e) = struct_defs.entry(type_annotation.to_id()) {
+                let id = type_annotation.to_id();
                 let obj = type_annotation.as_object().unwrap();
-                struct_defs.insert(type_annotation.clone(), as_struct_def(obj)?);
+                e.insert(RsStruct::try_from(obj)?.into_code());
+
+                for prop in &obj.props {
+                    if prop.type_annotation.is_nullable() {
+                        let id = prop.type_annotation.to_id();
+                        if let HashMapEntry::Vacant(e) = struct_defs.entry(id) {
+                            let nullable = RsNullableStruct::try_from(&prop.type_annotation)?;
+                            e.insert(nullable.definition);
+                        }
+                    }
+                }
 
                 // Collect default implementations for the alias type
                 let mut type_impls_map = BTreeMap::new();
-                collect_alias_default_impls(obj, &mut type_impls_map)?;
+                collect_alias_default_impls(id, obj, &mut type_impls_map)?;
 
                 type_impls.push(
                     type_impls_map
@@ -568,8 +573,7 @@ impl Schema {
                     .members
                     .iter()
                     .map(|m| format!("{},", m.name))
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                    .collect::<Vec<_>>();
 
                 formatdoc! {
                     r#"
@@ -577,7 +581,7 @@ impl Schema {
                     {members}
                     }}"#,
                     name = enum_schema.name,
-                    members = indent_str(members, 4),
+                    members = indent_str(&members.join("\n"), 4),
                 }
             })
             .collect();
@@ -613,127 +617,45 @@ impl Schema {
     /// ```
     pub fn try_collect_type_impls(
         &self,
-        type_impls: &mut BTreeMap<String, String>,
+        type_impls: &mut BTreeMap<u64, String>,
     ) -> Result<(), anyhow::Error> {
         // Collect extern function signatures and implementations
         for method_spec in &self.methods {
             for param in &method_spec.params {
                 // Collect nullable parameters
-                if let nullable_type @ TypeAnnotation::Nullable(type_annotation) =
-                    &param.type_annotation
-                {
-                    let rs_type = nullable_type.as_rs_type()?.0;
-
-                    if let Entry::Vacant(e) = type_impls.entry(rs_type) {
-                        let nullable_type = nullable_type.as_rs_bridge_type()?.0;
-                        let rs_impl_type = type_annotation.as_rs_impl_type()?.0;
-                        let default_val = type_annotation.as_rs_default_val()?;
-
-                        let default_impl = formatdoc! {
-                            r#"
-                            impl Default for {nullable_type} {{
-                                fn default() -> Self {{
-                                    {nullable_type} {{
-                                        null: true,
-                                        val: {default_val},
-                                    }}
-                                }}
-                            }}"#,
-                            nullable_type = nullable_type,
-                            default_val = default_val,
-                        };
-
-                        let nullable_impl = formatdoc! {
-                            r#"
-                            impl From<{nullable_type}> for Nullable<{rs_impl_type}> {{
-                                fn from(val: {nullable_type}) -> Self {{
-                                    Nullable::new(if val.null {{ None }} else {{ Some(val.val) }})
-                                }}
-                            }}
-
-                            impl From<Nullable<{rs_impl_type}>> for {nullable_type} {{
-                                fn from(val: Nullable<{rs_impl_type}>) -> Self {{
-                                    let val = val.into_value();
-                                    let null = val.is_none();
-                                    {nullable_type} {{
-                                        val: val.unwrap_or({default_val}),
-                                        null,
-                                    }}
-                                }}
-                            }}"#,
-                            rs_impl_type = rs_impl_type,
-                            nullable_type = nullable_type,
-                            default_val = default_val,
-                        };
-
-                        e.insert([default_impl, nullable_impl].join("\n\n"));
+                if param.type_annotation.is_nullable() {
+                    let id = param.type_annotation.to_id();
+                    if let BTreeMapEntry::Vacant(e) = type_impls.entry(id) {
+                        let nullable = RsNullableStruct::try_from(&param.type_annotation)?;
+                        e.insert(nullable.implementation);
                     }
                 }
             }
 
-            if let nullable_type @ TypeAnnotation::Nullable(type_annotation) = &method_spec.ret_type
-            {
-                let rs_type = nullable_type.as_rs_type()?.0;
-
-                if let Entry::Vacant(e) = type_impls.entry(rs_type) {
-                    let nullable_type = nullable_type.as_rs_bridge_type()?.0;
-                    let rs_impl_type = type_annotation.as_rs_impl_type()?.0;
-                    let default_val = type_annotation.as_rs_default_val()?;
-
-                    let default_impl = formatdoc! {
-                        r#"
-                        impl Default for {nullable_type} {{
-                            fn default() -> Self {{
-                                {nullable_type} {{
-                                    null: true,
-                                    val: {default_val},
-                                }}
-                            }}
-                        }}"#,
-                        nullable_type = nullable_type,
-                        default_val = default_val,
-                    };
-
-                    let nullable_impl = formatdoc! {
-                        r#"
-                        impl From<{nullable_type}> for Nullable<{rs_impl_type}> {{
-                            fn from(val: {nullable_type}) -> Self {{
-                                Nullable::new(if val.null {{ None }} else {{ Some(val.val) }})
-                            }}
-                        }}
-
-                        impl From<Nullable<{rs_impl_type}>> for {nullable_type} {{
-                            fn from(val: Nullable<{rs_impl_type}>) -> Self {{
-                                let val = val.into_value();
-                                let null = val.is_none();
-                                {nullable_type} {{
-                                    val: val.unwrap_or({default_val}),
-                                    null,
-                                }}
-                            }}
-                        }}"#,
-                        rs_impl_type = rs_impl_type,
-                        nullable_type = nullable_type,
-                        default_val = default_val,
-                    };
-
-                    e.insert([default_impl, nullable_impl].join("\n\n"));
+            // Collect nullable return type
+            if method_spec.ret_type.is_nullable() {
+                let id = method_spec.ret_type.to_id();
+                if let BTreeMapEntry::Vacant(e) = type_impls.entry(id) {
+                    let nullable = RsNullableStruct::try_from(&method_spec.ret_type)?;
+                    e.insert(nullable.implementation);
                 }
             }
         }
 
         // impl Default trait for the alias type
         for type_annotation in &self.aliases {
-            let obj = type_annotation.as_object().unwrap();
-            if !type_impls.contains_key(&obj.name) {
-                collect_alias_default_impls(obj, type_impls)?;
+            let id = type_annotation.to_id();
+            if !type_impls.contains_key(&id) {
+                let obj = type_annotation.as_object().unwrap();
+                collect_alias_default_impls(id, obj, type_impls)?;
             }
         }
 
         for type_annotation in &self.enums {
-            let enum_schema = type_annotation.as_enum().unwrap();
-            if !type_impls.contains_key(&enum_schema.name) {
-                type_impls.insert(enum_schema.name.clone(), enum_default_impl(enum_schema)?);
+            let id = type_annotation.to_id();
+            if let BTreeMapEntry::Vacant(e) = type_impls.entry(id) {
+                let enum_type_annotation = type_annotation.as_enum().unwrap();
+                e.insert(RsDefaultImpl::try_from(enum_type_annotation)?.into_code());
             }
         }
 
@@ -742,17 +664,18 @@ impl Schema {
 }
 
 pub mod template {
-    use std::collections::{btree_map::Entry, BTreeMap};
+    use std::collections::{btree_map::Entry as BTreeMapEntry, BTreeMap};
 
     use craby_common::utils::string::snake_case;
     use indoc::formatdoc;
 
     use crate::{
+        common::IntoCode,
         parser::types::{EnumTypeAnnotation, ObjectTypeAnnotation, TypeAnnotation},
         utils::indent_str,
     };
 
-    /// Generates Rust struct definition for FFI.
+    /// Rust struct definition for FFI.
     ///
     /// # Generated Code
     ///
@@ -763,60 +686,121 @@ pub mod template {
     ///     baz: bool,
     /// }
     /// ```
-    pub fn as_struct_def(obj: &ObjectTypeAnnotation) -> Result<String, anyhow::Error> {
-        let mut struct_defs = vec![];
-        let mut props = Vec::with_capacity(obj.props.len());
+    pub struct RsStruct(pub String);
 
-        for prop in &obj.props {
-            // Example:
-            // ```
-            // foo: String,
-            // bar: f64,
-            // baz: bool,
-            // ```
-            props.push(format!(
-                "{}: {},",
-                snake_case(&prop.name),
-                prop.type_annotation.as_rs_bridge_type()?.0
-            ));
-
-            if let nullable_type @ TypeAnnotation::Nullable(type_annotation) = &prop.type_annotation
-            {
-                let name = nullable_type.as_rs_bridge_type()?.0;
-                let rs_type = type_annotation.as_rs_bridge_type()?.0;
-                let struct_def = formatdoc! {
-                    r#"
-                    struct {name} {{
-                        null: bool,
-                        val: {rs_type}
-                    }}"#,
-                    name = name,
-                    rs_type = rs_type,
-                };
-
-                struct_defs.push(struct_def);
-            }
+    impl IntoCode for RsStruct {
+        fn into_code(self) -> String {
+            self.0
         }
-
-        let struct_def = formatdoc! {
-            r#"
-            struct {name} {{
-            {props}
-            }}"#,
-            name = obj.name,
-            props = indent_str(props.join("\n"), 4),
-        };
-
-        struct_defs.push(struct_def);
-
-        Ok(struct_defs.join("\n\n"))
     }
 
-    /// Generates Default implementation for struct types.
+    impl TryFrom<&ObjectTypeAnnotation> for RsStruct {
+        type Error = anyhow::Error;
+
+        fn try_from(obj: &ObjectTypeAnnotation) -> Result<Self, Self::Error> {
+            let mut props = Vec::with_capacity(obj.props.len());
+
+            for prop in &obj.props {
+                // Example:
+                // ```
+                // foo: String,
+                // bar: f64,
+                // baz: bool,
+                // ```
+                props.push(format!(
+                    "{}: {},",
+                    snake_case(&prop.name),
+                    prop.type_annotation.as_rs_bridge_type()?.into_code()
+                ));
+            }
+
+            let struct_def = formatdoc! {
+                r#"
+                struct {name} {{
+                {props}
+                }}"#,
+                name = obj.name,
+                props = indent_str(&props.join("\n"), 4),
+            };
+
+            Ok(RsStruct(struct_def))
+        }
+    }
+
+    /// Rust struct definition for nullable types.
+    pub struct RsNullableStruct {
+        pub definition: String,
+        pub implementation: String,
+    }
+
+    impl TryFrom<&TypeAnnotation> for RsNullableStruct {
+        type Error = anyhow::Error;
+
+        fn try_from(nullable_type: &TypeAnnotation) -> Result<Self, Self::Error> {
+            if let TypeAnnotation::Nullable(type_annotation) = nullable_type {
+                let struct_type = nullable_type.as_rs_bridge_type()?.into_code();
+                let base_type = type_annotation.as_rs_type()?.into_code();
+                let rs_impl_type = type_annotation.as_rs_impl_type()?.into_code();
+                let default_val = type_annotation.as_rs_default_val()?;
+
+                let struct_def = formatdoc! {
+                    r#"
+                    struct {struct_type} {{
+                        null: bool,
+                        val: {base_type},
+                    }}"#,
+                    struct_type = struct_type,
+                    base_type = base_type,
+                };
+
+                let struct_impl = formatdoc! {
+                    r#"
+                    impl Default for {struct_type} {{
+                        fn default() -> Self {{
+                            {struct_type} {{
+                                null: true,
+                                val: {default_val},
+                            }}
+                        }}
+                    }}
+
+                    impl From<{struct_type}> for Nullable<{rs_impl_type}> {{
+                        fn from(val: {struct_type}) -> Self {{
+                            Nullable::new(if val.null {{ None }} else {{ Some(val.val) }})
+                        }}
+                    }}
+    
+                    impl From<Nullable<{rs_impl_type}>> for {struct_type} {{
+                        fn from(val: Nullable<{rs_impl_type}>) -> Self {{
+                            let val = val.into_value();
+                            let null = val.is_none();
+                            {struct_type} {{
+                                val: val.unwrap_or({default_val}),
+                                null,
+                            }}
+                        }}
+                    }}"#,
+                    struct_type = struct_type,
+                    rs_impl_type = rs_impl_type,
+                    default_val = default_val,
+                };
+
+                return Ok(RsNullableStruct {
+                    definition: struct_def,
+                    implementation: struct_impl,
+                });
+            }
+
+            anyhow::bail!("Not a nullable type: {:?}", nullable_type);
+        }
+    }
+
+    /// Default implementation for struct types.
     ///
     /// # Generated Code
     ///
     /// ```rust,ignore
+    /// // Struct
     /// impl Default for MyStruct {
     ///     fn default() -> Self {
     ///         MyStruct {
@@ -826,119 +810,93 @@ pub mod template {
     ///         }
     ///     }
     /// }
-    /// ```
-    pub fn collect_alias_default_impls(
-        obj: &ObjectTypeAnnotation,
-        type_impls: &mut BTreeMap<String, String>,
-    ) -> Result<(), anyhow::Error> {
-        let mut props_with_default_val = Vec::with_capacity(obj.props.len());
-
-        for prop in &obj.props {
-            props_with_default_val.push(format!(
-                "{}: {}",
-                snake_case(&prop.name),
-                prop.type_annotation.as_rs_default_val()?
-            ));
-
-            if let nullable_type @ TypeAnnotation::Nullable(type_annotation) = &prop.type_annotation
-            {
-                let rs_type = nullable_type.as_rs_type()?.0;
-
-                if let Entry::Vacant(e) = type_impls.entry(rs_type) {
-                    let nullable_type = nullable_type.as_rs_bridge_type()?.0;
-                    let rs_impl_type = type_annotation.as_rs_impl_type()?.0;
-                    let default_val = type_annotation.as_rs_default_val()?;
-
-                    let default_impl = formatdoc! {
-                        r#"
-                        impl Default for {nullable_type} {{
-                            fn default() -> Self {{
-                                {nullable_type} {{
-                                    null: true,
-                                    val: {default_val},
-                                }}
-                            }}
-                        }}"#,
-                        nullable_type = nullable_type,
-                        default_val = default_val,
-                    };
-
-                    let nullable_impl = formatdoc! {
-                        r#"
-                        impl From<{nullable_type}> for Nullable<{rs_impl_type}> {{
-                            fn from(val: {nullable_type}) -> Self {{
-                                Nullable::new(if val.null {{ None }} else {{ Some(val.val) }})
-                            }}
-                        }}
-    
-                        impl From<Nullable<{rs_impl_type}>> for {nullable_type} {{
-                            fn from(val: Nullable<{rs_impl_type}>) -> Self {{
-                                let val = val.into_value();
-                                let null = val.is_none();
-                                {nullable_type} {{
-                                    val: val.unwrap_or({default_val}),
-                                    null,
-                                }}
-                            }}
-                        }}"#,
-                        rs_impl_type = rs_impl_type,
-                        nullable_type = nullable_type,
-                        default_val = default_val,
-                    };
-
-                    e.insert([default_impl, nullable_impl].join("\n\n"));
-                }
-            }
-        }
-
-        let default_impl = formatdoc! {
-            r#"
-            impl Default for {name} {{
-                fn default() -> Self {{
-                    {name} {{
-            {props}
-                    }}
-                }}
-            }}"#,
-            name = obj.name,
-            props = indent_str(props_with_default_val.join(",\n"), 12),
-        };
-
-        type_impls.insert(obj.name.clone(), default_impl);
-
-        Ok(())
-    }
-
-    /// Generates Default implementation for enum types.
     ///
-    /// # Generated Code
-    ///
-    /// ```rust,ignore
+    /// // Enum
     /// impl Default for MyEnum {
     ///     fn default() -> Self {
     ///         MyEnum::FirstMember
     ///     }
     /// }
     /// ```
-    pub fn enum_default_impl(enum_schema: &EnumTypeAnnotation) -> Result<String, anyhow::Error> {
-        let first_member = enum_schema
-            .members
-            .first()
-            .expect("Enum members are required")
-            .name
-            .clone();
+    pub struct RsDefaultImpl(pub String);
 
-        let name = enum_schema.name.clone();
+    impl IntoCode for RsDefaultImpl {
+        fn into_code(self) -> String {
+            self.0
+        }
+    }
 
-        Ok(formatdoc! {
-            r#"
-            impl Default for {name} {{
-                fn default() -> Self {{
-                    {name}::{first_member}
-                }}
-            }}"#,
-            name = name,
-            first_member = first_member
-        })
+    impl TryFrom<&ObjectTypeAnnotation> for RsDefaultImpl {
+        type Error = anyhow::Error;
+
+        fn try_from(obj: &ObjectTypeAnnotation) -> Result<Self, Self::Error> {
+            let mut props_with_default_val = Vec::with_capacity(obj.props.len());
+
+            for prop in &obj.props {
+                props_with_default_val.push(format!(
+                    "{}: {}",
+                    snake_case(&prop.name),
+                    prop.type_annotation.as_rs_default_val()?
+                ));
+            }
+
+            let default_impl = formatdoc! {
+                r#"
+                impl Default for {name} {{
+                    fn default() -> Self {{
+                        {name} {{
+                {props}
+                        }}
+                    }}
+                }}"#,
+                name = obj.name,
+                props = indent_str(&props_with_default_val.join(",\n"), 12),
+            };
+
+            Ok(RsDefaultImpl(default_impl))
+        }
+    }
+
+    impl TryFrom<&EnumTypeAnnotation> for RsDefaultImpl {
+        type Error = anyhow::Error;
+
+        fn try_from(enum_type_annotation: &EnumTypeAnnotation) -> Result<Self, Self::Error> {
+            let first_member = enum_type_annotation
+                .members
+                .first()
+                .ok_or_else(|| anyhow::anyhow!("Enum members are required"))?;
+
+            let default_impl = formatdoc! {
+                r#"
+                impl Default for {name} {{
+                    fn default() -> Self {{
+                        {name}::{first_member}
+                    }}
+                }}"#,
+                name = enum_type_annotation.name,
+                first_member = first_member.name
+            };
+
+            Ok(RsDefaultImpl(default_impl))
+        }
+    }
+
+    pub fn collect_alias_default_impls(
+        id: u64,
+        obj: &ObjectTypeAnnotation,
+        type_impls: &mut BTreeMap<u64, String>,
+    ) -> Result<(), anyhow::Error> {
+        for prop in &obj.props {
+            if prop.type_annotation.is_nullable() {
+                let id = prop.type_annotation.to_id();
+                if let BTreeMapEntry::Vacant(e) = type_impls.entry(id) {
+                    let nullable = RsNullableStruct::try_from(&prop.type_annotation)?;
+                    e.insert(nullable.implementation);
+                }
+            }
+        }
+
+        type_impls.insert(id, RsDefaultImpl::try_from(obj)?.into_code());
+        Ok(())
     }
 }
