@@ -23,9 +23,7 @@ on:
 
 jobs:
   build-artifacts:
-    if: |
-      !contains(github.event.head_commit.message, 'skip ci') || 
-      !contains(github.event.head_commit.message, 'chore: release')
+    if: ${{ !contains(github.event.head_commit.message, 'skip ci') }}
     strategy:
       fail-fast: false
       matrix:
@@ -259,6 +257,7 @@ jobs:
           run: sh -c "corepack enable && yarn workspace ${{ env.PACKAGE_NAME }} test:bindings"
 
   typescript-integrations:
+    if: "${{ !contains(github.event.head_commit.message, 'skip ci') && !contains(github.event.head_commit.message, 'chore: release') }}"
     name: TypeScript Integrations
     runs-on: ubuntu-latest
     steps:
@@ -286,6 +285,7 @@ jobs:
         run: yarn workspaces foreach --all --topological-dev run test
 
   rust-integrations:
+    if: "${{ !contains(github.event.head_commit.message, 'skip ci') && !contains(github.event.head_commit.message, 'chore: release') }}"
     name: Rust Integrations
     runs-on: ubuntu-latest
     steps:
