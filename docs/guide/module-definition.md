@@ -85,10 +85,10 @@ pub trait MyModuleSpec {
 
 ```rust
 // Auto-generated from TypeScript interfaces
-pub struct User {
-    pub name: String,
-    pub age: Number,
-    pub email: String,
+pub struct Something {
+    pub foo: String,
+    pub bar: Number,
+    pub baz: String,
 }
 ```
 

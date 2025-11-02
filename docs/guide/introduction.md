@@ -66,6 +66,17 @@ Craby ensures type consistency across the entire stack:
 
 With Craby, you focus on what matters—your implementation:
 
+```typescript
+import { NativeModuleRegistry, type NativeModule } from 'craby-module';
+
+// Define your module like this!
+interface Spec extends NativeModule {
+  add(a: number, b: number): number;
+}
+
+export default NativeModuleRegistry.getEnforcing<Spec>('Calculator');
+```
+
 ```rust
 #[craby_module]
 impl CalculatorSpec for Calculator {

@@ -17,9 +17,9 @@ Craby development requires **macOS** with **Xcode 12 or higher** for building [\
 Before you begin, make sure you have the following installed:
 
 - **macOS**: Required for building iOS targets
-- **XCode 12 or higher**: [Download](https://developer.apple.com/xcode)
+- **XCode 12+**: [Download](https://developer.apple.com/xcode)
 - **Node.js 18+**: [Download](https://nodejs.org/)
-- **Rust**: Install via [rustup](https://rustup.rs/)
+- **Rust 1.82+**: Install via [rustup](https://rustup.rs/)
 - **Android NDK**: [Download](https://developer.android.com/ndk/downloads)
 
 ```bash
