@@ -3,6 +3,8 @@ pub mod cxx {
 }
 
 pub mod toolchain {
+    use std::fmt::Display;
+
     use super::{android::Abi, ios::Identifier};
 
     pub enum Target {
@@ -29,6 +31,12 @@ pub mod toolchain {
         }
     }
 
+    impl Display for Target {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.to_str())
+        }
+    }
+
     pub const BUILD_TARGETS: [Target; 7] = [
         Target::Android(Abi::Arm64V8a),
         Target::Android(Abi::ArmeAbiV7a),
@@ -41,7 +49,7 @@ pub mod toolchain {
 }
 
 pub mod android {
-    use std::{collections::HashMap, path::PathBuf};
+    use std::{collections::HashMap, fmt::Display, path::PathBuf};
 
     use log::debug;
 
@@ -103,6 +111,12 @@ pub mod android {
             debug!("Android NDK environments: {:?}", envs);
 
             Ok(envs)
+        }
+    }
+
+    impl Display for Abi {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}", self.to_str())
         }
     }
 }

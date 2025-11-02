@@ -53,7 +53,7 @@ pub fn is_valid_version(version: &str) -> bool {
 
 pub fn parse_version_from_commit_message(msg: &str) -> Option<String> {
     println!("Parsing version from commit message: {:#?}", msg);
-    let re = regex::Regex::new(format!("chore: release v({})", VERSION_REGEX).as_str()).unwrap();
+    let re = regex::Regex::new(&format!("chore: release v({})", VERSION_REGEX)).unwrap();
     let captures = re.captures(msg);
 
     if let Some(captures) = captures {

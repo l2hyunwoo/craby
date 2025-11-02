@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, path::PathBuf};
 
 use craby_common::{
-    constants::{crate_dir, impl_mod_name, HASH_COMMAND_PREFIX},
+    constants::{crate_dir, impl_mod_name, HASH_COMMENT_PREFIX},
     utils::string::pascal_case,
 };
 use indoc::formatdoc;
@@ -174,7 +174,7 @@ impl RsTemplate {
     /// }
     /// ```
     fn rs_spec(&self, schema: &Schema) -> Result<String, anyhow::Error> {
-        let trait_name = pascal_case(format!("{}Spec", schema.module_name).as_str());
+        let trait_name = pascal_case(&format!("{}Spec", schema.module_name));
         let mut methods = schema
             .methods
             .iter()
@@ -191,7 +191,7 @@ impl RsTemplate {
                 .iter()
                 .map(|signal| {
                     let member_name = pascal_case(&signal.name);
-                    let enum_member = format!("{},", member_name);
+                    let enum_member = format!("{member_name},");
                     let enum_pattern_match = formatdoc! {
                         r#"{signal_enum_name}::{member_name} => manager.emit(self.id(), "{raw}"),"#,
                         raw = signal.name,
@@ -326,7 +326,7 @@ impl RsTemplate {
         let impl_mods = self
             .impl_mods(schemas)
             .iter()
-            .map(|impl_mod| format!("pub(crate) mod {};", impl_mod))
+            .map(|impl_mod| format!("pub(crate) mod {impl_mod};"))
             .collect::<Vec<String>>();
 
         let impl_mod_defs = impl_mods.join("\n");
@@ -369,7 +369,7 @@ impl RsTemplate {
         let impl_mods = self
             .impl_mods(&ctx.schemas)
             .iter()
-            .map(|impl_mod| format!("use crate::{}::*;", impl_mod))
+            .map(|impl_mod| format!("use crate::{impl_mod}::*;"))
             .collect::<Vec<String>>();
 
         let has_signals = ctx.schemas.iter().any(|schema| !schema.signals.is_empty());
@@ -418,7 +418,7 @@ impl RsTemplate {
         }
 
         let hash = Schema::to_hash(schemas);
-        let hash_comment = format!("{} {}", HASH_COMMAND_PREFIX, hash);
+        let hash_comment = format!("{HASH_COMMENT_PREFIX} {hash}");
         let type_impls = type_aliases.into_values().collect::<Vec<_>>();
 
         let content = [

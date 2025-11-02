@@ -90,10 +90,10 @@ impl Artifacts {
 
             let dest = if artifact_type == ArtifactType::Lib {
                 // Add `-prebuilt` suffix to the library name
-                let lib_name = file_name.to_string_lossy().to_string().replace(
-                    format!(".{}", ext).as_str(),
-                    format!("-prebuilt.{}", ext).as_str(),
-                );
+                let lib_name = file_name
+                    .to_string_lossy()
+                    .to_string()
+                    .replace(&format!(".{ext}"), &format!("-prebuilt.{ext}"));
                 dest.join(lib_name)
             } else {
                 dest.join(file_name)

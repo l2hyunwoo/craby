@@ -1,7 +1,7 @@
 use std::{fs, path::Path};
 
 use craby_codegen::types::Schema;
-use craby_common::constants::{crate_dir, HASH_COMMAND_PREFIX};
+use craby_common::constants::{crate_dir, HASH_COMMENT_PREFIX};
 use log::debug;
 
 /// Validate the schema(s) by comparing the hash in the `generated.rs` file
@@ -14,13 +14,13 @@ pub fn validate_schema(project_root: &Path, schemas: &[Schema]) -> anyhow::Resul
     match get_hash_from_src(&src) {
         Some(src_hash) => {
             let curr_hash = Schema::to_hash(schemas);
-            debug!("Current hash: {}, Expected hash: {}, ", curr_hash, src_hash);
+            debug!("Current hash: {:#?}, Expected hash: {:#?}, ", curr_hash, src_hash);
             if src_hash != curr_hash {
                 anyhow::bail!("Generated hash does not match the hash in the `generated.rs` file (current: {}, expected: {})", curr_hash, src_hash);
             }
             Ok(())
         }
-        None => anyhow::bail!("Hash not found in the `generated.rs` file"),
+        None => anyhow::bail!("Hash not found in the `generated.rs` file. Please run `crabygen` to generate the file."),
     }
 }
 
@@ -36,15 +36,18 @@ pub fn validate_schema(project_root: &Path, schemas: &[Schema]) -> anyhow::Resul
 ///
 /// The hash string (eg. `xxx`)
 fn get_hash_from_src(src: &str) -> Option<String> {
-    let hash = src
+    let comment = src
         .lines()
-        .find(|line| line.trim().starts_with(HASH_COMMAND_PREFIX));
+        .find(|line| line.trim().starts_with(HASH_COMMENT_PREFIX));
 
-    if let Some(hash) = hash {
-        return hash
-            .split(HASH_COMMAND_PREFIX)
+    if let Some(comment) = comment {
+        let hash = comment
+            .trim()
+            .split(HASH_COMMENT_PREFIX)
             .nth(1)
             .map(|hash| hash.trim().to_string());
+
+        return hash.filter(|hash| !hash.is_empty());
     }
 
     None

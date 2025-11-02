@@ -66,7 +66,7 @@ fn replace_path(
 
         for (key, value) in template_data {
             // Replace '{{key}}' with given value
-            parent = parent.replace(format!("{{{{{key}}}}}", key = key).as_str(), value);
+            parent = parent.replace(&format!("{{{{{key}}}}}", key = key), value);
         }
 
         PathBuf::from(parent).join(base_name)
@@ -75,7 +75,7 @@ fn replace_path(
 
         for (key, value) in template_data {
             // Replace '{{key}}' with given value
-            result = result.replace(format!("{{{{{key}}}}}", key = key).as_str(), value);
+            result = result.replace(&format!("{{{{{key}}}}}", key = key), value);
         }
 
         PathBuf::from(result)

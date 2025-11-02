@@ -11,7 +11,7 @@ pub fn build_target(project_root: &Path, target: &Target) -> Result<(), anyhow::
         .to_string();
     debug!("Manifest path: {}", manifest_path);
 
-    let target_label = format!("({})", target.to_str());
+    let target_label = format!("({})", target);
     debug!("Building for target {}", target_label);
 
     let args = [

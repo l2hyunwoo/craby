@@ -25,7 +25,7 @@ impl From<&str> for SanitizedString {
     fn from(value: &str) -> Self {
         SanitizedString(
             SanitizedString::regex()
-                .replace_all(value.to_lowercase().as_str(), "_")
+                .replace_all(&value.to_lowercase(), "_")
                 .to_string(),
         )
     }
@@ -35,7 +35,7 @@ impl From<&String> for SanitizedString {
     fn from(value: &String) -> Self {
         SanitizedString(
             SanitizedString::regex()
-                .replace_all(value.to_lowercase().as_str(), "_")
+                .replace_all(&value.to_lowercase(), "_")
                 .to_string(),
         )
     }

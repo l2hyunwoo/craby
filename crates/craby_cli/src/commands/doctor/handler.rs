@@ -33,9 +33,9 @@ pub fn perform(opts: DoctorOptions) -> anyhow::Result<()> {
     println!("\n{}", "Rust".bold().dimmed());
     let installed_targets = get_installed_targets()?;
     TARGETS.iter().for_each(|target| {
-        let target_label = format!("({})", target);
+        let target_label = format!("({target})");
         assert_with_status(
-            format!("Toolchain Target {}", target_label.dimmed()).as_str(),
+            &format!("Toolchain Target {}", target_label.dimmed()),
             || {
                 if installed_targets.contains(&target.to_string()) {
                     Ok(Status::Ok)
@@ -49,7 +49,7 @@ pub fn perform(opts: DoctorOptions) -> anyhow::Result<()> {
 
     println!("\n{}", "Android".bold().dimmed());
     assert_with_status(
-        format!("Environment variable: {}", "ANDROID_NDK_HOME".dimmed()).as_str(),
+        &format!("Environment variable: {}", "ANDROID_NDK_HOME".dimmed()),
         || match std::env::var("ANDROID_NDK_HOME") {
             Ok(_) => Ok(Status::Ok),
             Err(e) => {
@@ -63,12 +63,12 @@ pub fn perform(opts: DoctorOptions) -> anyhow::Result<()> {
         match target {
             Target::Android(abi) => {
                 assert_with_status(
-                    format!("Clang toolchain {}", format!("({})", abi.to_str()).dimmed()).as_str(),
+                    &format!("Clang toolchain {}", format!("({abi})").dimmed()),
                     || {
                         for (_, value) in abi.to_env()? {
                             if !value.try_exists()? {
                                 passed &= false;
-                                anyhow::bail!("Clang toolchain not found: {}", abi.to_str());
+                                anyhow::bail!("Clang toolchain not found: {abi}");
                             }
                         }
                         Ok(Status::Ok)
@@ -80,7 +80,7 @@ pub fn perform(opts: DoctorOptions) -> anyhow::Result<()> {
     }
 
     assert_with_status(
-        format!("Build configuration {}", "(build.gradle)".dimmed()).as_str(),
+        &format!("Build configuration {}", "(build.gradle)".dimmed()),
         || {
             if is_gradle_configured(&opts.project_root)? {
                 Ok(Status::Ok)
@@ -101,7 +101,7 @@ pub fn perform(opts: DoctorOptions) -> anyhow::Result<()> {
         }
     });
     assert_with_status(
-        format!("Build configuration {}", "(.podspec)".dimmed()).as_str(),
+        &format!("Build configuration {}", "(.podspec)".dimmed()),
         || {
             if is_podspec_configured(&opts.project_root)? {
                 Ok(Status::Ok)
