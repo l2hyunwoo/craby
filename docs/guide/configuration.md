@@ -30,6 +30,6 @@ Spec files **must** be prefixed with `Native` (e.g., `NativeCalculator.ts`) to b
 
 The `[android]` section configures Android-specific settings:
 
-- **`package_name`** (required): The Java package name for generated Kotlin/Android native module. Must follow reverse domain notation (e.g., `rs.craby.calculator`, `com.example.ㅡㅐ여ㅣㄷ`).
+- **`package_name`** (required): The Java package name for generated Kotlin/Android native module. Must follow reverse domain notation (e.g., `rs.craby.calculator`, `com.example.module`).
   - Format: Start with lowercase letter, can contain lowercase letters, numbers, underscores, and dots
   - Used in: AndroidManifest.xml, build.gradle namespace, Kotlin package declaration, and directory structure
