@@ -65,7 +65,7 @@ To integrate with package publishing, we recommend the following configuration:
 {
   "name": "my-module",
   "scripts": {
-    "prepack": "npm build",
+    "prepack": "yarn build",
     "build": "craby build && tsdown",
   }
 }
@@ -82,9 +82,7 @@ ios/framework/libmodule.xcframework/
 ├── Info.plist
 ├── ios-arm64/
 │   └── libmodule-prebuilt.a
-├── ios-arm64-simulator/
-│   └── libmodule-prebuilt.a
-└── ios-x86_64-simulator/
+└── ios-arm64_x86_64-simulator/
     └── libmodule-prebuilt.a
 ```
 
