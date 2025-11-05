@@ -1,9 +1,5 @@
 # Introduction
 
-::: warning
-This project is currently under development and is in early beta. For more information about the stable release, please refer to the following [link](https://github.com/leegeunhyeok/craby/issues/1)
-:::
-
 ## What is Craby?
 
 Craby is a type-safe Rust development tool for React Native. It automatically generates Rust/C++ bindings from TypeScript schemas and integrates directly with **pure C++ TurboModule**, bypassing platform-specific layers like `ObjCTurboModule` and `JavaTurboModule`.
